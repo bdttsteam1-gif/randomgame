@@ -92,6 +92,77 @@ select{padding:8px;border:1px solid var(--line);border-radius:6px;background:#ff
 .rrow.w{background:#e9f4e2;font-weight:700}
 .rrow b{min-width:22px}
 .rrow span:last-child{margin-left:auto;color:var(--fg2)}
+
+/* ===== PC 미리보기: 넓은 화면에서 2단 배치 ===== */
+@media (min-width:900px){
+  body{font-size:16px}
+  #app{max-width:1240px;padding:28px 32px 40px}
+  #entry{max-width:520px;margin:8vh auto 0;padding:30px}
+  #room:not([hidden]){display:grid!important;grid-template-columns:minmax(0,1fr) 340px;grid-template-areas:"banner banner" "stage head" "stage plist" "lwrap plist";gap:16px;align-items:start}
+  #banner{grid-area:banner} .card.head{grid-area:head} #stage{grid-area:stage;min-height:600px;padding:30px 36px} #lwrap{grid-area:lwrap} #plist{grid-area:plist}
+  .code{font-size:30px}
+  h2{font-size:23px;margin-bottom:12px}
+  .sub{font-size:14px}
+  .chip{font-size:15px;padding:5px 12px}
+  #plist .chips{gap:8px}
+  .btn{padding:14px 20px;font-size:16px}
+  .btn.sm{padding:8px 12px;font-size:14px}
+  .head .btn{padding:8px 12px}
+  .games{grid-template-columns:repeat(3,1fr);gap:12px}
+  .games .wide{grid-column:auto}
+  .games .btn{padding:26px 10px;font-size:18px}
+  #stage select{max-width:300px;padding:12px;font-size:16px}
+  #stage input[type=text]{padding:14px 16px;font-size:17px}
+  .big{font-size:140px;margin:18px 0}
+  .rps{gap:20px;margin:22px auto;max-width:720px}
+  .rps button{font-size:80px;padding:44px 0;border-radius:18px}
+  .rps button small{font-size:16px;margin-top:10px}
+  .rev .chip{font-size:20px;padding:10px 18px}
+  .qbox{font-size:26px;padding:22px 24px}
+  .arow{padding:12px 10px;font-size:17px}
+  .arow button{padding:8px 16px;font-size:15px}
+  .win-name{font-size:40px;margin:18px 0}
+  .spbtn{padding:70px 0;font-size:44px;max-width:720px;margin:18px auto;display:block}
+  .cols{grid-template-columns:repeat(auto-fill,minmax(84px,1fr));gap:12px}
+  .cols button{padding:16px 4px;font-size:18px}
+  .rrow{font-size:17px;padding:9px 12px}
+  canvas{margin:0 auto}
+}
+
+@media (min-width:900px){
+  #stage{min-height:0;padding:36px 44px}
+  #app{max-width:1280px}
+  #room:not([hidden]){grid-template-columns:minmax(0,1fr) 360px}
+  .games{gap:16px}
+  .games .btn{padding:58px 10px;font-size:23px;border-radius:12px}
+  #stage select{max-width:none;flex:1;padding:14px;font-size:17px}
+  #stage input[type=text]{padding:18px 18px;font-size:18px}
+  #stage .row .btn{padding:18px 26px;font-size:18px}
+  #plist{padding:20px}
+  #plist .chip{font-size:17px;padding:8px 16px}
+  .card.head{padding:20px}
+  .code{font-size:34px}
+  .tally{font-size:15px}
+  .ladhead{display:none}
+  .arow{font-size:18px;padding:14px 12px}
+  .qbox{font-size:30px}
+  #lwrap{padding:20px}
+}
+
+@media (min-width:900px){
+  .card.head{flex-wrap:wrap;row-gap:12px}
+  .head .row{flex-wrap:wrap}
+  .games .btn{font-size:21px;word-break:keep-all}
+  #room[data-phase]:not([data-phase="ladder"]):not([data-phase="lpick"]) #stage{min-height:calc(100vh - 72px);display:flex;flex-direction:column;justify-content:center}
+  #plist{position:sticky;top:16px}
+}
+
+@media (min-width:900px){
+  #stage > .rps{width:100%}
+  #stage > .btn.sm{align-self:flex-start}
+  #stage > .spbtn{width:100%}
+  #stage > .qbox{width:100%}
+}
 </style>
 </head>
 <body>
@@ -158,8 +229,11 @@ const short = n => n.length > 4 ? n.slice(0,4) + '…' : n;
 
 /* ============ 당첨 규칙 (방장 설정, 모든 게임 공통) ============ */
 /* k: 당첨 인원(null이면 참여 인원의 절반), role: 'pay' 당첨자가 쏜다 / 'free' 당첨자는 면제(나머지가 쏜다) */
-const cfg = { k:null, role:'pay' };
-try{ const r = store.get('ds_role'); if(r === 'pay' || r === 'free') cfg.role = r; }catch(e){}
+const cfg = { k:null, role:'pay', lmode:'pick' };   /* lmode: 사다리 이름 배치 pick(각자 고르기) / rand(랜덤) / host(방장이 직접) */
+try{
+  const r = store.get('ds_role'); if(r === 'pay' || r === 'free') cfg.role = r;
+  const m = store.get('ds_lmode'); if(m === 'pick' || m === 'rand' || m === 'host') cfg.lmode = m;
+}catch(e){}
 const maxK = np => Math.max(1, Math.min(MAXK, np - 1));
 const defK = np => Math.max(1, Math.floor(np / 2));
 function ruleFor(g, np){
@@ -177,28 +251,111 @@ let connected = false, lastHb = 0, joinedAt = 0, lastJoinSent = 0;
 let published = false, collision = false, hbTimer = null;
 let myPick = null, mySp = null, seenRk = -1, rkStart = 0;
 let qText = '', qDraft = '', qSent = false, qMine = '';
+let ladSeen = {}, lastLadIdx = -2;
 let cntVal = 0, cntTimer = null, prevPhase = '', lastPhaseR = '', lastStageHtml = '', lastSpSec = -1, lastQc = false;
 let sound = store.get('ds_snd') !== '0';
 /* 방장 전용(비공개) */
 let picks = {}, rpsTimer = null, spRes = {}, spTimer = null, lpTimer = null, qTimer = null, qAns = [], qMark = {};
 
 /* ============ 소리 / 진동 ============ */
-let actx = null;
-function beep(freq, dur, type, vol){
-  if(!sound) return;
+let actx = null, noiseBuf = null;
+function ac(){
   try{
     actx = actx || new (window.AudioContext || window.webkitAudioContext)();
     if(actx.state === 'suspended') actx.resume();
-    const o = actx.createOscillator(), g = actx.createGain();
-    o.type = type || 'sine'; o.frequency.value = freq;
-    g.gain.value = vol || 0.15;
-    o.connect(g); g.connect(actx.destination);
-    o.start(); g.gain.exponentialRampToValueAtTime(0.0001, actx.currentTime + dur);
-    o.stop(actx.currentTime + dur + 0.02);
+    return actx;
+  }catch(e){ return null; }
+}
+/* 음 하나: at 초 뒤에 시작, slideTo가 있으면 그 음높이로 미끄러짐 */
+function tone(freq, dur, type, vol, at, slideTo){
+  if(!sound) return;
+  const a = ac(); if(!a) return;
+  try{
+    const t = a.currentTime + (at || 0);
+    const o = a.createOscillator(), g = a.createGain();
+    o.type = type || 'sine';
+    o.frequency.setValueAtTime(freq, t);
+    if(slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+    g.gain.setValueAtTime(vol || 0.15, t);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    o.connect(g); g.connect(a.destination);
+    o.start(t); o.stop(t + dur + 0.03);
   }catch(e){}
 }
+const beep = (freq, dur, type, vol) => tone(freq, dur, type, vol, 0);
+/* 잡음(북 스틱·심벌 느낌) */
+function noise(dur, vol, at, hp){
+  if(!sound) return;
+  const a = ac(); if(!a) return;
+  try{
+    if(!noiseBuf){
+      noiseBuf = a.createBuffer(1, a.sampleRate, a.sampleRate);
+      const d = noiseBuf.getChannelData(0); for(let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+    }
+    const t = a.currentTime + (at || 0);
+    const src = a.createBufferSource(); src.buffer = noiseBuf;
+    const f = a.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = hp || 1200;
+    const g = a.createGain();
+    g.gain.setValueAtTime(vol || 0.1, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+    src.connect(f); f.connect(g); g.connect(a.destination);
+    src.start(t); src.stop(t + dur + 0.03);
+  }catch(e){}
+}
+/* 드럼롤: 점점 빨라지고 커짐 */
+function drumRoll(ms, vol){
+  const v = vol || 0.3; let t = 0, i = 0;
+  while(t < ms){
+    const p = t / ms;
+    noise(0.07, v * (0.35 + 0.65 * p), t / 1000, 700);
+    if(i % 2 === 0) tone(95 + 40 * p, 0.09, 'sine', v * 0.9, t / 1000, 60);
+    t += 125 - 90 * p; i++;
+  }
+  noise(0.5, v * 1.1, ms / 1000, 2500);   /* 마지막 심벌 */
+}
+function heartbeat(at, vol){
+  const v = vol || 0.4;
+  tone(72, 0.15, 'sine', v, at, 42);
+  tone(62, 0.17, 'sine', v * 0.85, (at || 0) + 0.18, 38);
+}
+function riser(sec, vol){ tone(180, sec, 'sawtooth', vol || 0.05, 0, 1500); noise(sec, (vol || 0.05) * 0.8, 0, 3000); }
+function timeUp(){ tone(220, 0.5, 'sawtooth', 0.2, 0, 140); tone(165, 0.5, 'square', 0.1, 0.05, 110); }
+/* 공개 순간 효과 */
+function revealSound(R){
+  if(!R || R.out === 'draw'){ tone(330, 0.45, 'triangle', 0.18, 0, 200); tone(247, 0.5, 'triangle', 0.14, 0.15, 150); return; }
+  noise(0.7, 0.22, 0, 1500); tone(130, 0.7, 'sine', 0.45, 0, 45);
+  [262, 330, 392].forEach((f, i) => tone(f, 0.45, 'triangle', 0.1, 0.05 + i * 0.03));
+  if(R.out === 'final'){ tone(98, 1.0, 'sawtooth', 0.14, 0.1, 49); noise(1.1, 0.18, 0.1, 900); }
+}
+function stingHit(){      /* 당첨! 철렁하는 소리 */
+  noise(0.6, 0.28, 0, 400); tone(110, 0.8, 'sawtooth', 0.22, 0, 52);
+  tone(262, 0.6, 'square', 0.1, 0.03, 130); tone(311, 0.6, 'square', 0.08, 0.03, 155); tone(370, 0.6, 'square', 0.07, 0.03, 185);
+}
+function relief(){        /* 통과! 휴 안도 */
+  tone(660, 0.12, 'triangle', 0.15, 0); tone(880, 0.18, 'triangle', 0.12, 0.09); tone(1175, 0.2, 'sine', 0.08, 0.17);
+}
+function runnerSound(ms, last){   /* 사다리 내려가는 동안: 똑딱 소리가 점점 빨라지고 높아짐, 마지막 주자는 드럼롤 */
+  const step = last ? 300 : 170, n = Math.max(3, Math.floor(ms / step));
+  for(let i = 0; i < n; i++){
+    const p = i / n;
+    tone(300 + 520 * p, 0.05, 'square', 0.04 + 0.06 * p, (i * ms / n) / 1000);
+  }
+  if(last){ heartbeat(0, 0.45); heartbeat(0.9, 0.5); drumRoll(Math.max(800, ms - 300), 0.28); }
+}
+function sadSound(){      /* 쏘는 사람: 뿌우… */
+  [392, 370, 349].forEach((f, i) => tone(f, 0.38, 'sawtooth', 0.13, i * 0.4, f * 0.93));
+  tone(330, 1.1, 'sawtooth', 0.14, 1.2, 150);
+}
+function fanfare(){       /* 면제/구경: 팡파르 */
+  [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.28, 'triangle', 0.2, i * 0.13));
+  tone(1047, 0.7, 'triangle', 0.18, 0.55); tone(784, 0.7, 'triangle', 0.12, 0.55); noise(0.5, 0.1, 0.55, 5000);
+}
+function resultSound(R){
+  if(!R) return;
+  if(R.void){ tone(300, 0.4, 'triangle', 0.15, 0, 200); return; }
+  const iPay = R.payers.includes(myId), inPool = R.pool.includes(myId);
+  if(inPool && iPay) sadSound(); else fanfare();
+}
 const vib = p => { try{ navigator.vibrate && navigator.vibrate(p); }catch(e){} };
-function fanfare(){ [523,659,784,1047].forEach((f,i)=>setTimeout(()=>beep(f,.25,'triangle',.2), i*130)); }
 
 function toast(t){ const el=$('#toast'); el.textContent=t; el.classList.add('show'); clearTimeout(toast._t); toast._t=setTimeout(()=>el.classList.remove('show'),2200); }
 
@@ -500,23 +657,42 @@ function startLadder(){
   const N = ps.length;
   S.rule = ruleFor('ladder', N);
   S.game = 'ladder'; S.result = null; S.phase = 'lpick';
-  S.lad = { N, ids: ps.map(p => p.id), k: S.rule.k, slots: {} };
-  S.rk++; S.secs = PICK_SECS;
-  clearTimeout(lpTimer); lpTimer = setTimeout(() => { if(S.phase === 'lpick') ladderRun(); }, PICK_SECS * 1000 + 1200);   /* 시간 안에 못 고른 사람은 랜덤 배정 */
+  const ids = ps.map(p => p.id), mode = cfg.lmode;
+  S.lad = { N, ids, k: S.rule.k, slots: {}, mode };
+  S.rk++; clearTimeout(lpTimer);
+  if(mode === 'rand'){ ladderRun(); return; }                         /* 랜덤 배치: 바로 사다리 공개 */
+  if(mode === 'host'){ S.lad.arr = ids.slice(); push(); return; }     /* 방장이 직접 배치: 방장이 시작할 때까지 대기 */
+  S.secs = PICK_SECS;
+  lpTimer = setTimeout(() => { if(S.phase === 'lpick') ladderRun(); }, PICK_SECS * 1000 + 1200);   /* 시간 안에 못 고른 사람은 랜덤 배정 */
   push();
 }
 function ladderCol(id, c){
-  if(S.phase !== 'lpick' || !S.lad.ids.includes(id)) return;
+  if(S.phase !== 'lpick' || S.lad.mode !== 'pick' || !S.lad.ids.includes(id)) return;
   const L = S.lad;
   if(!Number.isInteger(c) || c < 0 || c >= L.N) return;
   if(Object.entries(L.slots).some(([i, v]) => v === c && i !== id)) return;
   L.slots[id] = c; push(); checkLadderAll();
 }
 function checkLadderAll(){
-  if(S.phase !== 'lpick') return;
+  if(S.phase !== 'lpick' || S.lad.mode !== 'pick') return;
   const L = S.lad;
   const need = L.ids.filter(id => pl(id) && pl(id).on);
   if(need.every(id => L.slots[id] != null)) setTimeout(() => { if(S.phase === 'lpick') ladderRun(); }, 700);
+}
+function moveLad(id, d){
+  if(!isHost || S.phase !== 'lpick' || S.lad.mode !== 'host') return;
+  const a = S.lad.arr, i = a.indexOf(id), j = i + d;
+  if(i < 0 || j < 0 || j >= a.length) return;
+  [a[i], a[j]] = [a[j], a[i]]; push();
+}
+function shuffleLad(){
+  if(!isHost || S.phase !== 'lpick' || S.lad.mode !== 'host') return;
+  S.lad.arr = shuffle(S.lad.arr); push();
+}
+function startLadHost(){
+  if(!isHost || S.phase !== 'lpick' || S.lad.mode !== 'host') return;
+  S.lad.arr.forEach((id, i) => { S.lad.slots[id] = i; });
+  ladderRun();
 }
 function ladPath(L, c){
   const pts = [[c, 0]];
@@ -678,12 +854,16 @@ function render(){
 
   /* 단계 전환 효과 */
   if(S.phase !== prevPhase){
-    if(S.phase === 'count') startCount();
-    if(S.phase === 'reveal'){ beep(880, .3, 'square', .18); vib(120); }
+    if(S.phase === 'count'){ startCount(); drumRoll(3200, .32); }            /* 공개 직전 드럼롤 */
+    if(S.phase === 'reveal'){ revealSound(S.reveal); vib(120); }
     if(S.phase === 'quiz') beep(660, .2, 'triangle', .2);
-    if(S.phase === 'result'){ fanfare(); vib([200,80,200]); }
+    if(S.phase === 'speed') riser(SP_COUNT, .06);
+    if(S.phase === 'ladder'){ riser(2.4, .05); drumRoll(2400, .22); }        /* 사다리 공개 */
+    if(S.phase === 'result'){ resultSound(S.result); vib([200,80,200]); }
+    if(S.phase !== 'ladder'){ ladSeen = {}; lastLadIdx = -2; }
     prevPhase = S.phase;
   }
+  if(S.phase === 'ladder' && S.lad && S.lad.rungs) ladderSounds();
 
   let h = '';
   switch(S.phase){
@@ -701,9 +881,11 @@ function render(){
   const ae = document.activeElement;
   const typing = ae && $('#stage').contains(ae) && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName);
   const qc = !!(S.phase === 'quiz' && S.q && S.q.closed), qcChanged = qc !== lastQc; lastQc = qc;
+  if(qc && qcChanged) timeUp();
   if(typing && S.phase === lastPhaseR && !qcChanged) syncStage(h);     /* 입력 중에도 버튼 활성화/선택지는 최신으로 맞춤 */
   else if(h !== lastStageHtml){ $('#stage').innerHTML = h; lastStageHtml = h; }
   lastPhaseR = S.phase;
+  $('#room').dataset.phase = S.phase;
 
   /* 사다리 캔버스 */
   const showLad = (S.phase === 'ladder' || (S.phase === 'result' && S.lad && S.lad.rungs));
@@ -759,6 +941,8 @@ function lobbyHtml(){
       <button class="btn pri" type="button" data-a="ladder" ${ok2?'':'disabled'}>🪜 사다리타기</button>
       <button class="btn pri wide" type="button" data-a="speed" ${ok2?'':'disabled'}>⏱️ 스피드 (0초 맞추기)</button>
     </div>
+    <div class="row" style="flex-wrap:nowrap;margin-top:10px"><span class="sub" style="white-space:nowrap">🪜 사다리 이름 배치</span>
+      <select data-cfg="lmode" aria-label="사다리 이름 배치"><option value="pick" ${cfg.lmode==='pick'?'selected':''}>각자 번호 고르기 (${PICK_SECS}초)</option><option value="rand" ${cfg.lmode==='rand'?'selected':''}>랜덤 배치</option><option value="host" ${cfg.lmode==='host'?'selected':''}>방장이 직접 배치</option></select></div>
     <div class="row" style="flex-wrap:nowrap;margin-top:8px">
       <input type="text" id="qText" maxlength="80" placeholder="퀴즈 문제를 입력하세요" value="${esc(qText)}">
       <button class="btn pri" type="button" data-a="quiz" style="white-space:nowrap" ${okQ?'':'disabled'}>❓ 퀴즈</button>
@@ -808,8 +992,20 @@ function revealHtml(){
 }
 
 /* ----- 사다리 ----- */
+function ladHostHtml(){
+  const L = S.lad, arr = L.arr;
+  if(isHost){
+    return `<h2>🪜 사다리 이름 순서 정하기 · 당첨 ${L.k}명</h2>
+      <p class="sub" style="margin:0 0 8px">▲▼로 순서를 바꾸거나 섞은 뒤 시작하세요. 맨 위가 사다리 맨 왼쪽(1번)이에요.</p>` +
+      arr.map((id, i) => `<div class="arow"><b>${i+1}</b><span class="who">${esc(nm(id))}</span><span style="margin-left:auto;display:flex;gap:6px"><button type="button" data-mv="${esc(id)}|-1" ${i===0?'disabled':''}>▲</button><button type="button" data-mv="${esc(id)}|1" ${i===arr.length-1?'disabled':''}>▼</button></span></div>`).join('') +
+      `<div style="display:flex;gap:8px;margin-top:12px"><button class="btn" type="button" data-a="ladShuffle" style="flex:1">🔀 랜덤으로 섞기</button><button class="btn pri" type="button" data-a="ladStart" style="flex:2">사다리 시작</button></div>`;
+  }
+  return `<h2>🪜 사다리타기 · 당첨 ${L.k}명</h2><p class="sub" style="margin:0 0 8px">방장이 이름 순서를 정하는 중…</p>
+    <div class="chips">${arr.map((id, i) => `<span class="chip ${id===myId?'me':''}">${i+1}. ${esc(nm(id))}</span>`).join('')}</div>`;
+}
 function lpickHtml(){
   const L = S.lad, N = L.N;
+  if(L.mode === 'host') return ladHostHtml();
   const takenBy = {}; Object.entries(L.slots).forEach(([id, c]) => takenBy[c] = id);
   const amIn = L.ids.includes(myId);
   const left = Math.max(0, S.secs - Math.floor((Date.now() - rkStart) / 1000));
@@ -919,6 +1115,17 @@ function resultHtml(){
 }
 
 /* ---- 카운트다운 ---- */
+function ladderSounds(){
+  const L = S.lad;
+  if(L.idx >= 0 && L.idx !== lastLadIdx){
+    lastLadIdx = L.idx;
+    const id = L.order[L.idx];
+    if(!L.res[id]) runnerSound(L.dur, L.order.length - L.idx - 1 <= 1);
+  }
+  for(const id in L.res){
+    if(!ladSeen[id]){ ladSeen[id] = 1; if(L.res[id] === 'hit'){ stingHit(); vib([120, 60, 120]); } else relief(); }
+  }
+}
 function startCount(){
   clearInterval(cntTimer); cntVal = 3; beep(520, .15);
   cntTimer = setInterval(() => {
@@ -978,8 +1185,8 @@ function drawLadder(now){
   const L = S.lad; if(!L || !L.rungs) return;
   const N = L.N, rows = L.rungs.length;
   const wrapW = $('#lscroll').clientWidth || 320;
-  const colW = (N * 44 <= wrapW) ? wrapW / N : 44;
-  const top = 38, bot = 44, rowH = 16;
+  const colW = (N * 44 <= wrapW) ? Math.min(wrapW / N, 140) : 44;
+  const top = 38, bot = 44, rowH = wrapW > 700 ? 28 : 16;
   const W = Math.ceil(colW * N), H = top + rows * rowH + bot;
   const dpr = window.devicePixelRatio || 1;
   if(cv.width !== W * dpr || cv.height !== H * dpr){
@@ -1097,12 +1304,15 @@ $('#stage').addEventListener('click', e => {
   if(b.dataset.p != null){ myPick = +b.dataset.p; act({t:'pick', c: myPick}); render(); return; }
   if(b.dataset.c != null){ act({t:'col', c: +b.dataset.c}); return; }
   if(b.dataset.mark != null){ qMark[b.dataset.mark] = !qMark[b.dataset.mark]; render(); return; }
+  if(b.dataset.mv != null){ const [mid, md] = b.dataset.mv.split('|'); moveLad(mid, +md); return; }
   switch(b.dataset.a){
     case 'rps': startRps(); break;
     case 'ladder': startLadder(); break;
     case 'quiz': startQuiz(); break;
     case 'speed': startSpeed(); break;
     case 'ladderGo': ladderRun(); break;
+    case 'ladShuffle': shuffleLad(); break;
+    case 'ladStart': startLadHost(); break;
     case 'quizEnd': finishQuiz(); break;
     case 'ans': submitAnswer(); break;
     case 'lobby': toLobby(); break;
@@ -1120,6 +1330,7 @@ $('#stage').addEventListener('change', e => {
   const t = e.target; if(!t.dataset || !t.dataset.cfg) return;
   if(t.dataset.cfg === 'k') cfg.k = +t.value;
   else if(t.dataset.cfg === 'role' && (t.value === 'pay' || t.value === 'free')){ cfg.role = t.value; store.set('ds_role', t.value); }
+  else if(t.dataset.cfg === 'lmode' && (t.value === 'pick' || t.value === 'rand' || t.value === 'host')){ cfg.lmode = t.value; store.set('ds_lmode', t.value); }
   t.blur(); render();
 });
 window.addEventListener('pagehide', () => { try{ if(cli && !isHost) pub('a', {t:'off', id:myId}); }catch(e){} });
