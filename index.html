@@ -71,10 +71,9 @@ canvas{display:block}
 #toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 20px);transform:translateX(-50%);background:#23251d;color:#fff;padding:9px 16px;border-radius:999px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s;max-width:90vw;z-index:9}
 #toast.show{opacity:.95}
 select{padding:8px;border:1px solid var(--line);border-radius:6px;background:#fff;flex:1;min-width:0}
-/* 로비: 게임 카드 */
-.gbox{border:1px solid var(--line);border-radius:8px;padding:10px 12px;background:var(--paper2)}
-.gbox + .gbox{margin-top:10px}
-.glist{display:flex;flex-direction:column}
+/* 로비 */
+.games{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.games .wide{grid-column:1 / -1}
 /* 퀴즈 */
 .qbox{background:#fff3da;border:1px solid var(--amber-dk);border-radius:8px;padding:12px;font-size:18px;font-weight:700;margin:6px 0 10px;word-break:break-word}
 .arow{display:flex;align-items:center;gap:8px;padding:8px 6px;border-bottom:1px solid var(--line2)}
@@ -143,6 +142,7 @@ const BROKERS = ['wss://broker.emqx.io:8084/mqtt', 'wss://broker.hivemq.com:8884
 const NS = 'bdts-ts1-drink-v1/';
 const SHAPES = ['✌️', '✊', '✋'], SHAPE_NAME = ['가위', '바위', '보'];
 const RPS_SECS = 5;           /* 가위바위보 선택 제한 시간(초) */
+const PICK_SECS = 10;         /* 사다리 번호 선택 · 퀴즈 답변 제한 시간(초) */
 const SP_COUNT = 5;           /* 스피드 게임 카운트다운 시작 숫자 */
 const GAME_NAME = { rps:'가위바위보', ladder:'사다리타기', quiz:'퀴즈', speed:'스피드' };
 
@@ -156,20 +156,16 @@ const rnd = n => Math.floor(Math.random() * n);
 const shuffle = a => { a = a.slice(); for(let i=a.length-1;i>0;i--){ const j=rnd(i+1); [a[i],a[j]]=[a[j],a[i]]; } return a; };
 const short = n => n.length > 4 ? n.slice(0,4) + '…' : n;
 
-/* ============ 게임별 당첨 규칙 (방장 설정) ============ */
+/* ============ 당첨 규칙 (방장 설정, 모든 게임 공통) ============ */
 /* k: 당첨 인원(null이면 참여 인원의 절반), role: 'pay' 당첨자가 쏜다 / 'free' 당첨자는 면제(나머지가 쏜다) */
-const cfg = { rps:{k:null,role:'pay'}, ladder:{k:null,role:'pay'}, quiz:{k:null,role:'free'}, speed:{k:null,role:'free'} };
-try{
-  const saved = JSON.parse(store.get('ds_roles') || '{}');
-  for(const g in cfg) if(saved[g] === 'pay' || saved[g] === 'free') cfg[g].role = saved[g];
-}catch(e){}
+const cfg = { k:null, role:'pay' };
+try{ const r = store.get('ds_role'); if(r === 'pay' || r === 'free') cfg.role = r; }catch(e){}
 const maxK = np => Math.max(1, Math.min(MAXK, np - 1));
 const defK = np => Math.max(1, Math.floor(np / 2));
 function ruleFor(g, np){
-  const c = cfg[g];
-  let k = c.k == null ? defK(np) : c.k;
+  let k = cfg.k == null ? defK(np) : cfg.k;
   k = Math.max(1, Math.min(k, maxK(np)));
-  return { k, role: c.role };
+  return { k, role: cfg.role };
 }
 
 /* ============ 상태 ============ */
@@ -181,10 +177,10 @@ let connected = false, lastHb = 0, joinedAt = 0, lastJoinSent = 0;
 let published = false, collision = false, hbTimer = null;
 let myPick = null, mySp = null, seenRk = -1, rkStart = 0;
 let qText = '', qDraft = '', qSent = false, qMine = '';
-let cntVal = 0, cntTimer = null, prevPhase = '', lastPhaseR = '', lastStageHtml = '', lastSpSec = -1;
+let cntVal = 0, cntTimer = null, prevPhase = '', lastPhaseR = '', lastStageHtml = '', lastSpSec = -1, lastQc = false;
 let sound = store.get('ds_snd') !== '0';
 /* 방장 전용(비공개) */
-let picks = {}, rpsTimer = null, spRes = {}, spTimer = null, qAns = [], qMark = {};
+let picks = {}, rpsTimer = null, spRes = {}, spTimer = null, lpTimer = null, qTimer = null, qAns = [], qMark = {};
 
 /* ============ 소리 / 진동 ============ */
 let actx = null;
@@ -361,7 +357,7 @@ function leaveRoom(silent){
     if(isHost && !silent){ pub('s', null, {qos:0, retain:true}); }
     try{ cli.end(true); }catch(e){}
   }
-  clearInterval(hbTimer); clearTimeout(rpsTimer); clearTimeout(spTimer); clearInterval(cntTimer);
+  clearInterval(hbTimer); clearTimeout(rpsTimer); clearTimeout(spTimer); clearTimeout(lpTimer); clearTimeout(qTimer); clearInterval(cntTimer);
   cli = null; room = null; isHost = false; S = null; published = false; connected = false;
   $('#room').hidden = true; $('#entry').hidden = false; $('#banner').hidden = true;
   $('#lwrap').hidden = true; animIdx = -2;
@@ -410,7 +406,7 @@ function handleAction(m){
 }
 
 function resetToLobby(){
-  clearTimeout(rpsTimer); clearTimeout(spTimer);
+  clearTimeout(rpsTimer); clearTimeout(spTimer); clearTimeout(lpTimer); clearTimeout(qTimer);
   picks = {}; spRes = {}; qAns = []; qMark = {};
   S.phase = 'lobby'; S.game = null; S.alive = null; S.picked = []; S.reveal = null; S.lad = null; S.result = null; S.note = '';
   S.rule = null; S.conf = null; S.need = null; S.rpool = null; S.q = null; S.qids = null; S.sp = null;
@@ -505,6 +501,8 @@ function startLadder(){
   S.rule = ruleFor('ladder', N);
   S.game = 'ladder'; S.result = null; S.phase = 'lpick';
   S.lad = { N, ids: ps.map(p => p.id), k: S.rule.k, slots: {} };
+  S.rk++; S.secs = PICK_SECS;
+  clearTimeout(lpTimer); lpTimer = setTimeout(() => { if(S.phase === 'lpick') ladderRun(); }, PICK_SECS * 1000 + 1200);   /* 시간 안에 못 고른 사람은 랜덤 배정 */
   push();
 }
 function ladderCol(id, c){
@@ -532,6 +530,7 @@ function ladPath(L, c){
 }
 function ladderRun(){
   if(S.phase !== 'lpick') return;
+  clearTimeout(lpTimer);
   const L = S.lad, N = L.N;
   const used = new Set(Object.values(L.slots));
   const free = shuffle([...Array(N).keys()].filter(c => !used.has(c)));
@@ -583,24 +582,31 @@ function startQuiz(){
   const ids = S.players.filter(p => p.on && p.id !== myId).map(p => p.id);
   if(ids.length < 1){ toast('답변할 사람이 필요해요'); return; }
   S.rule = ruleFor('quiz', ids.length);
-  S.game = 'quiz'; S.qids = ids; S.q = { text: text.slice(0,80), subs: [] };
+  S.game = 'quiz'; S.qids = ids; S.q = { text: text.slice(0,80), subs: [], closed: false }; S.secs = PICK_SECS;
   qAns = []; qMark = {};
   S.rk++; S.picked = []; S.phase = 'quiz'; S.result = null;
+  clearTimeout(qTimer); qTimer = setTimeout(closeQuiz, PICK_SECS * 1000 + 1200);
   push();
 }
+function closeQuiz(){
+  if(S.phase !== 'quiz' || S.q.closed) return;
+  clearTimeout(qTimer); S.q.closed = true; push();
+}
 function quizAnswer(id, text){
-  if(S.phase !== 'quiz' || !S.qids || !S.qids.includes(id) || S.q.subs.includes(id)) return;
+  if(S.phase !== 'quiz' || S.q.closed || !S.qids || !S.qids.includes(id) || S.q.subs.includes(id)) return;
   const t = String(text || '').trim().slice(0, 60);
   if(!t) return;
   qAns.push({ id, text: t });          /* 답변 내용은 방장 기기에만 보관 (다른 사람이 베끼지 못하게) */
   S.q.subs.push(id); S.picked = S.q.subs.slice();
   push();
+  if(S.qids.filter(i => pl(i) && pl(i).on).every(i => S.q.subs.includes(i))) closeQuiz();   /* 전원 제출하면 바로 마감 */
 }
 function quizWinners(){
   return qAns.filter(a => qMark[a.id]).slice(0, S.rule.k).map(a => a.id);   /* 정답자 중 빨리 낸 순서대로 k명 */
 }
 function finishQuiz(){
   if(S.phase !== 'quiz') return;
+  clearTimeout(qTimer);
   const winners = quizWinners();
   finishGame('quiz', winners, S.qids, {
     q: S.q.text,
@@ -694,7 +700,9 @@ function render(){
   /* 입력창/선택창을 쓰는 중이면 화면을 갈아엎지 않음(입력 내용·펼친 목록 유지) */
   const ae = document.activeElement;
   const typing = ae && $('#stage').contains(ae) && /^(INPUT|SELECT|TEXTAREA)$/.test(ae.tagName);
-  if(!(typing && S.phase === lastPhaseR) && h !== lastStageHtml){ $('#stage').innerHTML = h; lastStageHtml = h; }
+  const qc = !!(S.phase === 'quiz' && S.q && S.q.closed), qcChanged = qc !== lastQc; lastQc = qc;
+  if(typing && S.phase === lastPhaseR && !qcChanged) syncStage(h);     /* 입력 중에도 버튼 활성화/선택지는 최신으로 맞춤 */
+  else if(h !== lastStageHtml){ $('#stage').innerHTML = h; lastStageHtml = h; }
   lastPhaseR = S.phase;
 
   /* 사다리 캔버스 */
@@ -713,6 +721,22 @@ function render(){
   updateBanner();
 }
 
+/* 입력/선택 중일 땐 화면을 통째로 바꾸지 않고, 시작 버튼의 활성 여부와 드롭다운 목록만 갱신 */
+function syncStage(h){
+  const tmp = document.createElement('div'); tmp.innerHTML = h;
+  const st = $('#stage'), ae = document.activeElement;
+  tmp.querySelectorAll('button[data-a]').forEach(nb => {
+    const cb = st.querySelector(`button[data-a="${nb.dataset.a}"]`);
+    if(cb) cb.disabled = nb.disabled;
+  });
+  tmp.querySelectorAll('select[data-cfg]').forEach(ns => {
+    const cs = st.querySelector(`select[data-cfg="${ns.dataset.cfg}"]`);
+    if(cs && cs !== ae) cs.innerHTML = ns.innerHTML;
+  });
+  const nh = tmp.querySelector('[data-sync="hint"]'), ch = st.querySelector('[data-sync="hint"]');
+  if(ch && !nh) ch.remove();
+}
+
 function tallyHtml(){
   const arr = Object.entries(S.buys || {}).filter(([id]) => pl(id)).sort((a,b) => b[1]-a[1]);
   if(!arr.length) return '';
@@ -720,31 +744,28 @@ function tallyHtml(){
 }
 
 /* ----- 로비 ----- */
-function gbox(g, icon, title, desc, np, minNp, extra){
-  const npc = Math.max(np, 1);
-  const r = ruleFor(g, npc), mk = maxK(npc);
-  const ko = [...Array(mk).keys()].map(i => i + 1).map(k => `<option value="${k}" ${k===r.k?'selected':''}>당첨 ${k}명</option>`).join('');
-  const ro = `<option value="pay" ${r.role==='pay'?'selected':''}>당첨자가 쏜다</option><option value="free" ${r.role==='free'?'selected':''}>당첨자는 면제</option>`;
-  return `<div class="gbox"><h3>${icon} ${title}</h3><div class="sub">${desc}</div>${extra||''}
-    <div class="row" style="flex-wrap:nowrap;margin-top:8px"><select data-cfg="${g}.k" aria-label="당첨 인원">${ko}</select><select data-cfg="${g}.role" aria-label="당첨자 규칙">${ro}</select></div>
-    <button class="btn pri full" style="margin-top:8px" type="button" data-a="${g}" ${np>=minNp?'':'disabled'}>${title} 시작</button></div>`;
-}
 function lobbyHtml(){
   const online = S.players.filter(p => p.on).length;
-  if(isHost){
-    return `<h2>게임을 골라 주세요</h2>
-      <p class="sub" style="margin:0 0 10px">코드 <b>${esc(room)}</b>를 알려주거나 "링크 복사"로 공유하세요. 당첨 인원은 기본이 참여 인원의 절반이고, 게임마다 따로 정할 수 있어요.</p>
-      <div class="glist">
-        ${gbox('rps','✌️','가위바위보',`${RPS_SECS}초 안에 선택! 진 사람이 당첨 인원만큼 남을 때까지 반복`, online, MIN)}
-        ${gbox('ladder','🪜','사다리타기','번호를 고르면 사다리가 공개되고 한 명씩 내려가요', online, MIN)}
-        ${gbox('quiz','❓','퀴즈 (빨리 맞추기)','문제를 내면 빨리 낸 순서대로 답이 올라와요. 정답자를 고르면 빠른 순서대로 당첨', online - 1, 1,
-          `<input type="text" id="qText" maxlength="80" placeholder="문제를 입력하세요" value="${esc(qText)}" style="margin-top:8px">`)}
-        ${gbox('speed','⏱️','스피드 (0초 맞추기)',`${SP_COUNT}…0 카운트다운, 0이 된 뒤 가장 빨리 "당첨!" 버튼을 누른 순서대로 당첨 (0 전에 누르면 실격)`, online, MIN)}
-      </div>
-      ${online<MIN?'<div class="sub center" style="margin-top:8px">2명 이상 모이면 시작할 수 있어요 (퀴즈는 방장 외 1명)</div>':''}
-      <button class="btn sm" type="button" data-a="close" style="margin-top:10px">방 닫기</button>${tallyHtml()}`;
-  }
-  return `<h2>방장이 게임을 고르는 중…</h2><p class="sub" style="margin:0">잠시만 기다려 주세요. 접속 ${online}명</p>${tallyHtml()}`;
+  if(!isHost) return `<h2>방장이 게임을 고르는 중…</h2><p class="sub" style="margin:0">잠시만 기다려 주세요. 접속 ${online}명</p>${tallyHtml()}`;
+  const np = Math.max(online, 1), r = ruleFor('rps', np), mk = maxK(np);
+  const ko = [...Array(mk).keys()].map(i => i + 1).map(k => `<option value="${k}" ${k===r.k?'selected':''}>당첨 ${k}명</option>`).join('');
+  const ro = `<option value="pay" ${r.role==='pay'?'selected':''}>당첨자가 쏜다</option><option value="free" ${r.role==='free'?'selected':''}>당첨자는 면제</option>`;
+  const ok2 = online >= MIN, okQ = online - 1 >= 1;
+  return `<h2>당첨 규칙</h2>
+    <div class="row" style="flex-wrap:nowrap"><select data-cfg="k" aria-label="당첨 인원">${ko}</select><select data-cfg="role" aria-label="당첨자 규칙">${ro}</select></div>
+    <div class="sub" style="margin:4px 0 12px">기본 당첨 인원은 참여 인원의 절반 · 방 코드 <b>${esc(room)}</b></div>
+    <div class="games">
+      <button class="btn pri" type="button" data-a="rps" ${ok2?'':'disabled'}>✌️ 가위바위보</button>
+      <button class="btn pri" type="button" data-a="ladder" ${ok2?'':'disabled'}>🪜 사다리타기</button>
+      <button class="btn pri wide" type="button" data-a="speed" ${ok2?'':'disabled'}>⏱️ 스피드 (0초 맞추기)</button>
+    </div>
+    <div class="row" style="flex-wrap:nowrap;margin-top:8px">
+      <input type="text" id="qText" maxlength="80" placeholder="퀴즈 문제를 입력하세요" value="${esc(qText)}">
+      <button class="btn pri" type="button" data-a="quiz" style="white-space:nowrap" ${okQ?'':'disabled'}>❓ 퀴즈</button>
+    </div>
+    <div class="sub" style="margin-top:8px">가위바위보 ${RPS_SECS}초 · 사다리타기/퀴즈 ${PICK_SECS}초 안에 선택해요</div>
+    ${online<MIN?'<div class="sub center" data-sync="hint" style="margin-top:8px">2명 이상 모이면 시작할 수 있어요 (퀴즈는 방장 외 1명)</div>':''}
+    <button class="btn sm" type="button" data-a="close" style="margin-top:10px">방 닫기</button>${tallyHtml()}`;
 }
 
 /* ----- 가위바위보 ----- */
@@ -791,8 +812,9 @@ function lpickHtml(){
   const L = S.lad, N = L.N;
   const takenBy = {}; Object.entries(L.slots).forEach(([id, c]) => takenBy[c] = id);
   const amIn = L.ids.includes(myId);
-  let h = `<h2>🪜 사다리타기 · 당첨 ${L.k}명</h2>
-    <p class="sub" style="margin:0">${amIn?'내가 출발할 번호를 골라요. 사다리는 다 고른 뒤에 공개돼요!':'이번 판은 구경만 해요 👀'} (${Object.keys(L.slots).length}/${N}명 선택)</p>
+  const left = Math.max(0, S.secs - Math.floor((Date.now() - rkStart) / 1000));
+  let h = `<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2 style="margin:0">🪜 사다리타기 · 당첨 ${L.k}명</h2><b id="tm" style="font-size:22px;color:var(--red)">${left}</b></div>
+    <p class="sub" style="margin:4px 0 0">${amIn?`${PICK_SECS}초 안에 출발 번호를 골라요. 못 고르면 랜덤 배정! 사다리는 다 고른 뒤에 공개돼요.`:'이번 판은 구경만 해요 👀'} (${Object.keys(L.slots).length}/${N}명 선택)</p>
     <div class="cols">` +
     [...Array(N).keys()].map(c => {
       const who = takenBy[c];
@@ -822,10 +844,12 @@ function ladderHtml(){
 /* ----- 퀴즈 ----- */
 function quizHtml(){
   const q = S.q, k = S.rule.k, n = S.qids.length;
-  let h = `<h2>❓ 퀴즈 · 당첨 ${k}명 ${S.rule.role==='pay'?'(당첨자가 쏜다)':'(당첨자는 면제)'}</h2><div class="qbox">${esc(q.text)}</div>`;
+  const left = Math.max(0, S.secs - Math.floor((Date.now() - rkStart) / 1000));
+  const timer = q.closed ? '<b style="font-size:16px;color:var(--fg3)">⏰ 마감</b>' : `<b id="tm" style="font-size:22px;color:var(--red)">${left}</b>`;
+  let h = `<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2 style="margin:0">❓ 퀴즈 · 당첨 ${k}명 ${S.rule.role==='pay'?'(쏜다)':'(면제)'}</h2>${timer}</div><div class="qbox">${esc(q.text)}</div>`;
   if(isHost){
     const win = quizWinners();
-    h += `<div class="sub">${q.subs.length}/${n}명 제출 · 빨리 낸 순서대로 쌓여요. 정답인 사람을 눌러 표시하세요.</div>`;
+    h += `<div class="sub">${q.subs.length}/${n}명 제출${q.closed?' (마감)':` · ${PICK_SECS}초 안에 답을 받아요`} · 빨리 낸 순서대로 쌓여요. 정답인 사람을 눌러 표시하세요.</div>`;
     if(!qAns.length) h += `<div class="center sub" style="padding:18px 0">아직 답변이 없어요…</div>`;
     else h += qAns.map((a, i) => {
       const ok = !!qMark[a.id];
@@ -841,7 +865,8 @@ function quizHtml(){
   const sent = qSent || q.subs.includes(myId);
   if(!amIn) h += `<p class="sub">이번 문제는 구경만 해요 👀 (${q.subs.length}/${n}명 제출)</p>`;
   else if(sent) h += `<p class="center" style="margin:6px 0">✅ 제출 완료!${qMine?` <b>"${esc(qMine)}"</b>`:''}</p><p class="center sub">방장이 정답을 고르는 중… (${q.subs.length}/${n}명 제출)</p>`;
-  else h += `<input type="text" id="qAns" maxlength="60" placeholder="정답을 입력하고 빨리 제출!" autocomplete="off" value="${esc(qDraft)}">
+  else if(q.closed) h += `<p class="center" style="margin:10px 0">⏰ 시간이 끝났어요. 제출하지 못했어요.</p><p class="center sub">방장이 정답을 고르는 중… (${q.subs.length}/${n}명 제출)</p>`;
+  else h += `<input type="text" id="qAns" maxlength="60" placeholder="정답을 입력하고 빨리 제출! (시간이 끝나면 입력한 답이 자동 제출돼요)" autocomplete="off" value="${esc(qDraft)}">
     <button class="btn pri full" style="margin-top:8px" type="button" data-a="ans">제출</button>
     <p class="sub center" style="margin:8px 0 0">${q.subs.length}/${n}명 제출 · 다른 사람 답은 보이지 않아요</p>`;
   return h;
@@ -906,10 +931,16 @@ function startCount(){
 /* ---- 남은 시간 / 스피드 카운트다운 표시 ---- */
 setInterval(() => {
   if(!S) return;
-  if(S.phase === 'rps'){
+  if(S.phase === 'rps' || S.phase === 'lpick' || (S.phase === 'quiz' && S.q && !S.q.closed)){
     const el = $('#tm'); if(!el) return;
     const left = Math.max(0, S.secs - Math.floor((Date.now() - rkStart) / 1000));
-    if(el.textContent !== String(left)){ el.textContent = left; if(left <= 2 && left > 0) beep(700, .06, 'square', .08); }
+    if(el.textContent !== String(left)){
+      el.textContent = left; if(left <= 2 && left > 0) beep(700, .06, 'square', .08);
+      /* 퀴즈: 시간이 끝났는데 입력해 둔 답이 있으면 자동 제출 */
+      if(left === 0 && S.phase === 'quiz' && !isHost && S.qids && S.qids.includes(myId) && !qSent && !S.q.subs.includes(myId)){
+        const inp = $('#qAns'); if(inp && inp.value.trim()) submitAnswer();
+      }
+    }
   }else if(S.phase === 'speed'){
     const st = spState();
     const c = $('#spc'); if(c && c.textContent !== String(st.sec)) c.textContent = st.sec;
@@ -1087,14 +1118,8 @@ $('#stage').addEventListener('keydown', e => {
 });
 $('#stage').addEventListener('change', e => {
   const t = e.target; if(!t.dataset || !t.dataset.cfg) return;
-  const [g, f] = t.dataset.cfg.split('.');
-  if(!cfg[g]) return;
-  if(f === 'k') cfg[g].k = +t.value;
-  else if(f === 'role' && (t.value === 'pay' || t.value === 'free')){
-    cfg[g].role = t.value;
-    const o = {}; for(const x in cfg) o[x] = cfg[x].role;
-    store.set('ds_roles', JSON.stringify(o));
-  }
+  if(t.dataset.cfg === 'k') cfg.k = +t.value;
+  else if(t.dataset.cfg === 'role' && (t.value === 'pay' || t.value === 'free')){ cfg.role = t.value; store.set('ds_role', t.value); }
   t.blur(); render();
 });
 window.addEventListener('pagehide', () => { try{ if(cli && !isHost) pub('a', {t:'off', id:myId}); }catch(e){} });
