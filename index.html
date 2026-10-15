@@ -33,7 +33,10 @@ input[type=text]{width:100%;padding:11px 12px;border:1px solid var(--line);borde
 .btn:disabled{opacity:.45}
 .btn.sm{padding:6px 10px;font-size:13px}
 .btn.full{width:100%}
-.head{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.head{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap}
+.volrow{flex:1 1 100%;display:flex;align-items:center;gap:10px;font-size:13px;color:var(--fg2)}
+.volrow input[type=range]{flex:1;accent-color:var(--amber-dk);height:28px}
+.volrow #volv{min-width:40px;text-align:right}
 .head .row{flex-wrap:nowrap;gap:6px}
 .head .btn{white-space:nowrap;padding:6px 9px}
 .code{font-size:22px;font-weight:800;letter-spacing:.2em}
@@ -71,7 +74,15 @@ canvas{display:block}
 #toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 20px);transform:translateX(-50%);background:#23251d;color:#fff;padding:9px 16px;border-radius:999px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s;max-width:90vw;z-index:9}
 #toast.show{opacity:.95}
 select{padding:8px;border:1px solid var(--line);border-radius:6px;background:#fff;flex:1;min-width:0}
-/* 로비 */
+/* 메인(게임 선택) / 게임 설정 */
+.games4{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.gbtn{padding:30px 8px;font-size:18px;display:flex;flex-direction:column;align-items:center;gap:8px;line-height:1.3;border-radius:12px}
+.gbtn .gi{font-size:40px;line-height:1}
+.seg{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:6px}
+.seg button{padding:12px 6px;border:2px solid var(--line);border-radius:10px;background:#fff;font-weight:600;font-size:14px;line-height:1.3}
+.seg button small{display:block;font-weight:500;color:var(--fg3);font-size:11.5px;margin-top:3px}
+.seg button.on{border-color:var(--amber-dk);background:#fff3da;box-shadow:0 0 0 3px rgba(235,157,42,.3)}
+.setup-sec{margin-top:14px}
 .games{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .games .wide{grid-column:1 / -1}
 /* 퀴즈 */
@@ -111,6 +122,11 @@ select{padding:8px;border:1px solid var(--line);border-radius:6px;background:#ff
   .games{grid-template-columns:repeat(3,1fr);gap:12px}
   .games .wide{grid-column:auto}
   .games .btn{padding:26px 10px;font-size:18px}
+  .games4{grid-template-columns:repeat(4,1fr);gap:16px}
+  .gbtn{padding:64px 10px;font-size:22px}
+  .gbtn .gi{font-size:60px}
+  .seg button{padding:18px 8px;font-size:16px}
+  .seg button small{font-size:13px}
   #stage select{max-width:300px;padding:12px;font-size:16px}
   #stage input[type=text]{padding:14px 16px;font-size:17px}
   .big{font-size:140px;margin:18px 0}
@@ -197,6 +213,7 @@ select{padding:8px;border:1px solid var(--line);border-radius:6px;background:#ff
         <button class="btn sm" id="share" type="button">링크 복사</button>
         <button class="btn sm" id="leave" type="button">나가기</button>
       </div>
+      <div class="volrow"><span id="volico">🔊</span><input type="range" id="vol" min="0" max="100" step="1" aria-label="볼륨"><span id="volv"></span></div>
     </div>
     <div class="card" id="stage"></div>
     <div class="card" id="lwrap" hidden><div id="lscroll"><canvas id="cv"></canvas></div></div>
@@ -229,7 +246,7 @@ const short = n => n.length > 4 ? n.slice(0,4) + '…' : n;
 
 /* ============ 당첨 규칙 (방장 설정, 모든 게임 공통) ============ */
 /* k: 당첨 인원(null이면 참여 인원의 절반), role: 'pay' 당첨자가 쏜다 / 'free' 당첨자는 면제(나머지가 쏜다) */
-const cfg = { k:null, role:'pay', lmode:'pick' };   /* lmode: 사다리 이름 배치 pick(각자 고르기) / rand(랜덤) / host(방장이 직접) */
+const cfg = { k:null, role:'pay', lmode:'pick', qn:1 };   /* qn: 퀴즈 문제 수 */   /* lmode: 사다리 이름 배치 pick(각자 고르기) / rand(랜덤) / host(방장이 직접) */
 try{
   const r = store.get('ds_role'); if(r === 'pay' || r === 'free') cfg.role = r;
   const m = store.get('ds_lmode'); if(m === 'pick' || m === 'rand' || m === 'host') cfg.lmode = m;
@@ -254,14 +271,23 @@ let qText = '', qDraft = '', qSent = false, qMine = '';
 let ladSeen = {}, lastLadIdx = -2;
 let cntVal = 0, cntTimer = null, prevPhase = '', lastPhaseR = '', lastStageHtml = '', lastSpSec = -1, lastQc = false;
 let sound = store.get('ds_snd') !== '0';
+let vol = (() => { const v = parseInt(store.get('ds_vol'), 10); return Number.isFinite(v) ? Math.max(0, Math.min(100, v)) : 60; })();   /* 볼륨 0~100 (100% = 원래 소리의 5배, 컴프레서로 찌그러짐 방지) */
+const VOL_MAX = 5, volGain = () => vol / 100 * VOL_MAX;
+let setupGame = null;   /* 방장이 지금 설정 중인 게임(내 화면에서만) */
 /* 방장 전용(비공개) */
 let picks = {}, rpsTimer = null, spRes = {}, spTimer = null, lpTimer = null, qTimer = null, qAns = [], qMark = {};
 
 /* ============ 소리 / 진동 ============ */
-let actx = null, noiseBuf = null;
+let actx = null, noiseBuf = null, master = null;
 function ac(){
   try{
-    actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+    if(!actx){
+      actx = new (window.AudioContext || window.webkitAudioContext)();
+      master = actx.createGain(); master.gain.value = volGain();
+      const comp = actx.createDynamicsCompressor();
+      comp.threshold.value = -10; comp.knee.value = 8; comp.ratio.value = 12; comp.attack.value = 0.003; comp.release.value = 0.15;
+      master.connect(comp); comp.connect(actx.destination);
+    }
     if(actx.state === 'suspended') actx.resume();
     return actx;
   }catch(e){ return null; }
@@ -278,7 +304,7 @@ function tone(freq, dur, type, vol, at, slideTo){
     if(slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
     g.gain.setValueAtTime(vol || 0.15, t);
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(g); g.connect(a.destination);
+    o.connect(g); g.connect(master || a.destination);
     o.start(t); o.stop(t + dur + 0.03);
   }catch(e){}
 }
@@ -297,7 +323,7 @@ function noise(dur, vol, at, hp){
     const f = a.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = hp || 1200;
     const g = a.createGain();
     g.gain.setValueAtTime(vol || 0.1, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    src.connect(f); f.connect(g); g.connect(a.destination);
+    src.connect(f); f.connect(g); g.connect(master || a.destination);
     src.start(t); src.stop(t + dur + 0.03);
   }catch(e){}
 }
@@ -514,6 +540,7 @@ function leaveRoom(silent){
     if(isHost && !silent){ pub('s', null, {qos:0, retain:true}); }
     try{ cli.end(true); }catch(e){}
   }
+  setupGame = null;
   clearInterval(hbTimer); clearTimeout(rpsTimer); clearTimeout(spTimer); clearTimeout(lpTimer); clearTimeout(qTimer); clearInterval(cntTimer);
   cli = null; room = null; isHost = false; S = null; published = false; connected = false;
   $('#room').hidden = true; $('#entry').hidden = false; $('#banner').hidden = true;
@@ -566,7 +593,7 @@ function resetToLobby(){
   clearTimeout(rpsTimer); clearTimeout(spTimer); clearTimeout(lpTimer); clearTimeout(qTimer);
   picks = {}; spRes = {}; qAns = []; qMark = {};
   S.phase = 'lobby'; S.game = null; S.alive = null; S.picked = []; S.reveal = null; S.lad = null; S.result = null; S.note = '';
-  S.rule = null; S.conf = null; S.need = null; S.rpool = null; S.q = null; S.qids = null; S.sp = null;
+  S.rule = null; S.conf = null; S.need = null; S.rpool = null; S.q = null; S.qids = null; S.sp = null; S.qs = null;
 }
 function toLobby(){ resetToLobby(); push(); }
 
@@ -752,11 +779,13 @@ function ladFinish(){
 }
 
 /* ----- 퀴즈: 방장이 문제를 내고, 빨리 낸 순서대로 답변이 쌓임. 방장이 정답자를 고름 ----- */
-function startQuiz(){
+function startQuiz(next){
   const text = qText.trim();
   if(!text){ toast('문제를 입력해 주세요'); return; }
   const ids = S.players.filter(p => p.on && p.id !== myId).map(p => p.id);
   if(ids.length < 1){ toast('답변할 사람이 필요해요'); return; }
+  qText = '';
+  if(next && S.qs) S.qs.i++; else S.qs = { n: cfg.qn, i: 1 };      /* 문제 시리즈: n문제 중 i번째 */
   S.rule = ruleFor('quiz', ids.length);
   S.game = 'quiz'; S.qids = ids; S.q = { text: text.slice(0,80), subs: [], closed: false }; S.secs = PICK_SECS;
   qAns = []; qMark = {};
@@ -907,8 +936,8 @@ function render(){
 function syncStage(h){
   const tmp = document.createElement('div'); tmp.innerHTML = h;
   const st = $('#stage'), ae = document.activeElement;
-  tmp.querySelectorAll('button[data-a]').forEach(nb => {
-    const cb = st.querySelector(`button[data-a="${nb.dataset.a}"]`);
+  tmp.querySelectorAll('button[data-a], button[data-go]').forEach(nb => {
+    const cb = st.querySelector(nb.dataset.a != null ? `button[data-a="${nb.dataset.a}"]` : `button[data-go="${nb.dataset.go}"]`);
     if(cb) cb.disabled = nb.disabled;
   });
   tmp.querySelectorAll('select[data-cfg]').forEach(ns => {
@@ -925,31 +954,50 @@ function tallyHtml(){
   return `<div class="tally">오늘의 전적(쏜 횟수): ${arr.map(([id,n]) => `${esc(nm(id))} ${n}회`).join(' · ')}</div>`;
 }
 
-/* ----- 로비 ----- */
+/* ----- 로비(게임 선택) / 게임 설정 ----- */
+const GTITLE = { rps:'✌️ 가위바위보', ladder:'🪜 사다리타기', speed:'⏱️ 스피드 게임', quiz:'❓ 퀴즈풀기' };
 function lobbyHtml(){
   const online = S.players.filter(p => p.on).length;
   if(!isHost) return `<h2>방장이 게임을 고르는 중…</h2><p class="sub" style="margin:0">잠시만 기다려 주세요. 접속 ${online}명</p>${tallyHtml()}`;
-  const np = Math.max(online, 1), r = ruleFor('rps', np), mk = maxK(np);
+  if(setupGame) return setupHtml(setupGame, online);
+  const ok2 = online >= MIN, okQ = online - 1 >= 1;
+  const gb = (g, ok, label) => `<button class="btn pri gbtn" type="button" data-go="${g}" ${ok?'':'disabled'}><span class="gi">${GTITLE[g].split(' ')[0]}</span>${label}</button>`;
+  return `<h2>게임 선택</h2>
+    <div class="games4">${gb('rps', ok2, '가위바위보')}${gb('ladder', ok2, '사다리타기')}${gb('speed', ok2, '스피드<br>(0초 맞추기)')}${gb('quiz', okQ, '퀴즈풀기')}</div>
+    ${online<MIN?'<div class="sub center" data-sync="hint" style="margin-top:10px">2명 이상 모이면 시작할 수 있어요 (퀴즈는 방장 외 1명) · 방 코드 <b>'+esc(room)+'</b></div>':'<div class="sub center" style="margin-top:10px">방 코드 <b>'+esc(room)+'</b></div>'}
+    <button class="btn sm" type="button" data-a="close" style="margin-top:10px">방 닫기</button>${tallyHtml()}`;
+}
+function ruleBlock(np){
+  const npc = Math.max(np, 1), r = ruleFor('rps', npc), mk = maxK(npc);
   const ko = [...Array(mk).keys()].map(i => i + 1).map(k => `<option value="${k}" ${k===r.k?'selected':''}>당첨 ${k}명</option>`).join('');
   const ro = `<option value="pay" ${r.role==='pay'?'selected':''}>당첨자가 쏜다</option><option value="free" ${r.role==='free'?'selected':''}>당첨자는 면제</option>`;
-  const ok2 = online >= MIN, okQ = online - 1 >= 1;
-  return `<h2>당첨 규칙</h2>
-    <div class="row" style="flex-wrap:nowrap"><select data-cfg="k" aria-label="당첨 인원">${ko}</select><select data-cfg="role" aria-label="당첨자 규칙">${ro}</select></div>
-    <div class="sub" style="margin:4px 0 12px">기본 당첨 인원은 참여 인원의 절반 · 방 코드 <b>${esc(room)}</b></div>
-    <div class="games">
-      <button class="btn pri" type="button" data-a="rps" ${ok2?'':'disabled'}>✌️ 가위바위보</button>
-      <button class="btn pri" type="button" data-a="ladder" ${ok2?'':'disabled'}>🪜 사다리타기</button>
-      <button class="btn pri wide" type="button" data-a="speed" ${ok2?'':'disabled'}>⏱️ 스피드 (0초 맞추기)</button>
-    </div>
-    <div class="row" style="flex-wrap:nowrap;margin-top:10px"><span class="sub" style="white-space:nowrap">🪜 사다리 이름 배치</span>
-      <select data-cfg="lmode" aria-label="사다리 이름 배치"><option value="pick" ${cfg.lmode==='pick'?'selected':''}>각자 번호 고르기 (${PICK_SECS}초)</option><option value="rand" ${cfg.lmode==='rand'?'selected':''}>랜덤 배치</option><option value="host" ${cfg.lmode==='host'?'selected':''}>방장이 직접 배치</option></select></div>
-    <div class="row" style="flex-wrap:nowrap;margin-top:8px">
+  return `<div class="setup-sec"><div class="sub" style="margin-bottom:4px">당첨 규칙 · 기본 당첨 인원은 참여 인원(${npc}명)의 절반</div>
+    <div class="row" style="flex-wrap:nowrap"><select data-cfg="k" aria-label="당첨 인원">${ko}</select><select data-cfg="role" aria-label="당첨자 규칙">${ro}</select></div></div>`;
+}
+function setupHtml(g, online){
+  const np = g === 'quiz' ? online - 1 : online;
+  const ok = g === 'quiz' ? online - 1 >= 1 : online >= MIN;
+  const DESC = {
+    rps: `${RPS_SECS}초 안에 가위·바위·보를 고르고, 진 사람이 당첨 인원만큼 남을 때까지 반복해요.`,
+    ladder: '번호(이름 위치)를 정하면 사다리가 공개되고 한 명씩 내려가요.',
+    speed: `${SP_COUNT}…0 카운트다운, 0이 된 뒤 가장 빨리 "당첨!" 버튼을 누른 순서대로 당첨돼요. (0 전에 누르면 실격)`,
+    quiz: `문제를 내면 ${PICK_SECS}초 안에 답이 빨리 낸 순서대로 쌓여요. 정답자를 고르면 빠른 순서대로 당첨돼요.`
+  };
+  let extra = '';
+  if(g === 'ladder'){
+    const m = cfg.lmode;
+    const sb = (v, t, d) => `<button type="button" data-lm="${v}" class="${m===v?'on':''}">${t}<small>${d}</small></button>`;
+    extra = `<div class="setup-sec"><div class="sub">이름 배치 방식</div><div class="seg">${sb('pick','각자 고르기',PICK_SECS+'초 안에')}${sb('rand','랜덤 배치','바로 시작')}${sb('host','방장이 정하기','▲▼로 직접')}</div></div>`;
+  }else if(g === 'quiz'){
+    const no = [...Array(10).keys()].map(i => i + 1).map(n => `<option value="${n}" ${n===cfg.qn?'selected':''}>${n}문제</option>`).join('');
+    extra = `<div class="setup-sec"><div class="sub" style="margin-bottom:4px">첫 번째 문제 · 문제 수를 정하면 한 문제씩 이어서 낼 수 있어요</div>
       <input type="text" id="qText" maxlength="80" placeholder="퀴즈 문제를 입력하세요" value="${esc(qText)}">
-      <button class="btn pri" type="button" data-a="quiz" style="white-space:nowrap" ${okQ?'':'disabled'}>❓ 퀴즈</button>
-    </div>
-    <div class="sub" style="margin-top:8px">가위바위보 ${RPS_SECS}초 · 사다리타기/퀴즈 ${PICK_SECS}초 안에 선택해요</div>
-    ${online<MIN?'<div class="sub center" data-sync="hint" style="margin-top:8px">2명 이상 모이면 시작할 수 있어요 (퀴즈는 방장 외 1명)</div>':''}
-    <button class="btn sm" type="button" data-a="close" style="margin-top:10px">방 닫기</button>${tallyHtml()}`;
+      <div class="row" style="flex-wrap:nowrap;margin-top:8px"><span class="sub" style="white-space:nowrap">반복 횟수</span><select data-cfg="qn" aria-label="문제 수">${no}</select></div></div>`;
+  }
+  return `<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2 style="margin:0">${GTITLE[g]}</h2><button class="btn sm" type="button" data-a="back">← 게임 선택</button></div>
+    <div class="sub" style="margin:6px 0 0">${DESC[g]}</div>${ruleBlock(np)}${extra}
+    <button class="btn pri full" type="button" data-a="${g}" style="margin-top:16px;padding:16px;font-size:17px" ${ok?'':'disabled'}>${g==='quiz'?'퀴즈 시작':GTITLE[g].split(' ').slice(1).join(' ')+' 시작'}</button>
+    ${ok?'':'<div class="sub center" data-sync="hint" style="margin-top:8px">사람이 더 모이면 시작할 수 있어요</div>'}`;
 }
 
 /* ----- 가위바위보 ----- */
@@ -1042,7 +1090,7 @@ function quizHtml(){
   const q = S.q, k = S.rule.k, n = S.qids.length;
   const left = Math.max(0, S.secs - Math.floor((Date.now() - rkStart) / 1000));
   const timer = q.closed ? '<b style="font-size:16px;color:var(--fg3)">⏰ 마감</b>' : `<b id="tm" style="font-size:22px;color:var(--red)">${left}</b>`;
-  let h = `<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2 style="margin:0">❓ 퀴즈 · 당첨 ${k}명 ${S.rule.role==='pay'?'(쏜다)':'(면제)'}</h2>${timer}</div><div class="qbox">${esc(q.text)}</div>`;
+  let h = `<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2 style="margin:0">❓ 퀴즈${S.qs && S.qs.n > 1 ? ` ${S.qs.i}/${S.qs.n}` : ''} · 당첨 ${k}명 ${S.rule.role==='pay'?'(쏜다)':'(면제)'}</h2>${timer}</div><div class="qbox">${esc(q.text)}</div>`;
   if(isHost){
     const win = quizWinners();
     h += `<div class="sub">${q.subs.length}/${n}명 제출${q.closed?' (마감)':` · ${PICK_SECS}초 안에 답을 받아요`} · 빨리 낸 순서대로 쌓여요. 정답인 사람을 눌러 표시하세요.</div>`;
@@ -1110,7 +1158,13 @@ function resultHtml(){
       (R.answers.length ? R.answers.map((a, i) => `<div class="arow ${a.ok?'ok':''}"><b>${i+1}</b><span class="who">${esc(nm(a.id))}${R.winners.includes(a.id)?'<span class="badge">당첨</span>':''}</span><span class="atx">${esc(a.text)}</span><span>${a.ok?'✓':''}</span></div>`).join('') : '<div class="sub">제출된 답변이 없어요</div>');
   }
   h += tallyHtml();
-  if(isHost) h += `<button class="btn pri full" type="button" data-a="lobby" style="margin-top:12px">한 판 더 (로비로)</button>`;
+  const more = R.game === 'quiz' && S.qs && S.qs.i < S.qs.n;
+  if(isHost){
+    if(more) h += `<div class="sub" style="margin-top:14px">다음 문제 (${S.qs.i + 1}/${S.qs.n})</div>
+      <input type="text" id="qText" maxlength="80" placeholder="다음 문제를 입력하세요" value="${esc(qText)}" style="margin-top:6px">
+      <div style="display:flex;gap:8px;margin-top:8px"><button class="btn" type="button" data-a="lobby" style="flex:1">그만하기</button><button class="btn pri" type="button" data-a="quizNext" style="flex:2">다음 문제 시작</button></div>`;
+    else h += `<div style="display:flex;gap:8px;margin-top:14px"><button class="btn" type="button" data-a="lobby" style="flex:1">게임 선택</button><button class="btn pri" type="button" data-a="again" style="flex:2">${R.game==='quiz'?'퀴즈 다시 하기':'한 판 더'}</button></div>`;
+  }else if(more) h += `<p class="center sub" style="margin-top:12px">방장이 다음 문제(${S.qs.i + 1}/${S.qs.n})를 내는 중…</p>`;
   return h;
 }
 
@@ -1284,6 +1338,14 @@ $('#snd').addEventListener('click', () => {
   sound = !sound; store.set('ds_snd', sound ? '1' : '0'); $('#snd').textContent = sound ? '🔊' : '🔇'; beep(660, .1);
 });
 $('#snd').textContent = sound ? '🔊' : '🔇';
+const volIcon = () => { $('#volico').textContent = vol === 0 || !sound ? '🔇' : vol < 35 ? '🔈' : vol < 70 ? '🔉' : '🔊'; };
+$('#vol').value = vol; $('#volv').textContent = vol + '%'; volIcon();
+let volTest = 0;
+$('#vol').addEventListener('input', e => {
+  vol = +e.target.value; store.set('ds_vol', String(vol)); $('#volv').textContent = vol + '%'; volIcon();
+  if(master) master.gain.value = volGain();
+  clearTimeout(volTest); volTest = setTimeout(() => { if(!sound){ sound = true; store.set('ds_snd', '1'); $('#snd').textContent = '🔊'; } ac(); if(master) master.gain.value = volGain(); tone(660, .18, 'triangle', .2); tone(880, .18, 'triangle', .16, .12); volIcon(); }, 120);
+});
 
 function submitAnswer(){
   const el = $('#qAns'); const t = el ? el.value.trim() : '';
@@ -1304,6 +1366,8 @@ $('#stage').addEventListener('click', e => {
   if(b.dataset.p != null){ myPick = +b.dataset.p; act({t:'pick', c: myPick}); render(); return; }
   if(b.dataset.c != null){ act({t:'col', c: +b.dataset.c}); return; }
   if(b.dataset.mark != null){ qMark[b.dataset.mark] = !qMark[b.dataset.mark]; render(); return; }
+  if(b.dataset.go != null){ setupGame = b.dataset.go; render(); return; }
+  if(b.dataset.lm != null){ cfg.lmode = b.dataset.lm; store.set('ds_lmode', cfg.lmode); render(); return; }
   if(b.dataset.mv != null){ const [mid, md] = b.dataset.mv.split('|'); moveLad(mid, +md); return; }
   switch(b.dataset.a){
     case 'rps': startRps(); break;
@@ -1314,8 +1378,11 @@ $('#stage').addEventListener('click', e => {
     case 'ladShuffle': shuffleLad(); break;
     case 'ladStart': startLadHost(); break;
     case 'quizEnd': finishQuiz(); break;
+    case 'quizNext': startQuiz(true); break;
+    case 'back': setupGame = null; render(); break;
+    case 'again': { const g = S.game; toLobby(); setupGame = g; render(); break; }
     case 'ans': submitAnswer(); break;
-    case 'lobby': toLobby(); break;
+    case 'lobby': setupGame = null; toLobby(); break;
     case 'close': if(confirm('방을 닫을까요?')) leaveRoom(false); break;
   }
 });
@@ -1330,7 +1397,7 @@ $('#stage').addEventListener('change', e => {
   const t = e.target; if(!t.dataset || !t.dataset.cfg) return;
   if(t.dataset.cfg === 'k') cfg.k = +t.value;
   else if(t.dataset.cfg === 'role' && (t.value === 'pay' || t.value === 'free')){ cfg.role = t.value; store.set('ds_role', t.value); }
-  else if(t.dataset.cfg === 'lmode' && (t.value === 'pick' || t.value === 'rand' || t.value === 'host')){ cfg.lmode = t.value; store.set('ds_lmode', t.value); }
+  else if(t.dataset.cfg === 'qn'){ cfg.qn = Math.max(1, Math.min(10, +t.value || 1)); }
   t.blur(); render();
 });
 window.addEventListener('pagehide', () => { try{ if(cli && !isHost) pub('a', {t:'off', id:myId}); }catch(e){} });
