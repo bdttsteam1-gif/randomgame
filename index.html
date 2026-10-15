@@ -83,6 +83,7 @@ select{padding:8px;border:1px solid var(--line);border-radius:6px;background:#ff
 .seg button small{display:block;font-weight:500;color:var(--fg3);font-size:11.5px;margin-top:3px}
 .seg button.on{border-color:var(--amber-dk);background:#fff3da;box-shadow:0 0 0 3px rgba(235,157,42,.3)}
 .setup-sec{margin-top:14px}
+.rulebar{background:#fff8e8;border:1px solid #f0d9a8;border-radius:12px;padding:10px 12px}
 .games{display:grid;grid-template-columns:1fr 1fr;gap:8px}
 .games .wide{grid-column:1 / -1}
 /* 퀴즈 */
@@ -595,7 +596,31 @@ function resetToLobby(){
   S.phase = 'lobby'; S.game = null; S.alive = null; S.picked = []; S.reveal = null; S.lad = null; S.result = null; S.note = '';
   S.rule = null; S.conf = null; S.need = null; S.rpool = null; S.q = null; S.qids = null; S.sp = null; S.qs = null;
 }
-function toLobby(){ resetToLobby(); push(); }
+function toLobby(){ dropBots(); resetToLobby(); push(); }
+
+/* ----- 연습 모드: 사람이 방장 1명뿐이면 '연습봇'이 함께 참여 ----- */
+const BOT = 'bot1';
+const humansOn = () => S.players.filter(p => p.on && !p.bot).length;
+function ensureBot(){
+  if(humansOn() === 1 && !pl(BOT)) S.players.push({ id: BOT, name: '🤖 연습봇', on: true, bot: true });
+}
+function dropBots(){ S.players = S.players.filter(p => !p.bot); }
+const botWait = (fn, ms) => setTimeout(() => { try{ fn(); }catch(e){} }, ms);
+function botRps(){ if(pl(BOT) && S.alive.includes(BOT)) botWait(() => rpsPick(BOT, Math.floor(Math.random()*3)), 700 + Math.random()*2200); }
+function botLadder(){
+  if(!pl(BOT) || S.lad.mode !== 'pick') return;
+  botWait(() => {
+    if(S.phase !== 'lpick') return;
+    const used = Object.values(S.lad.slots), free = [...Array(S.lad.N).keys()].filter(c => !used.includes(c));
+    if(free.length) ladderCol(BOT, free[Math.floor(Math.random()*free.length)]);
+  }, 1000 + Math.random()*2500);
+}
+function botSpeed(){ if(pl(BOT)) botWait(() => speedPress(BOT, 230 + Math.random()*420), SP_COUNT*1000 + 400 + Math.random()*500); }
+function botQuiz(){
+  if(!pl(BOT)) return;
+  const A = ['글쎄요…','정답은 음료!','아메리카노','잘 모르겠어요','3월 3일'];
+  botWait(() => quizAnswer(BOT, A[Math.floor(Math.random()*A.length)]), 1500 + Math.random()*3500);
+}
 
 /* 게임 종료 공통: winners=당첨자, pool=참여자. role에 따라 쏘는 사람(payers)이 정해짐 */
 function finishGame(game, winners, pool, extra){
@@ -610,6 +635,7 @@ function finishGame(game, winners, pool, extra){
 
 /* ----- 가위바위보: 당첨(=진 사람) k명을 가릴 때까지 ----- */
 function startRps(){
+  ensureBot();
   const ps = S.players.filter(p => p.on);
   if(ps.length < MIN){ toast('최소 2명이 필요해요'); return; }
   const ids = ps.map(p => p.id);
@@ -621,7 +647,7 @@ function startRps(){
 function nextRpsRound(){
   picks = {}; S.rk++; S.picked = []; S.reveal = null; S.phase = 'rps'; S.secs = RPS_SECS;
   clearTimeout(rpsTimer); rpsTimer = setTimeout(resolveRps, RPS_SECS * 1000 + 1200);
-  push();
+  push(); botRps();
 }
 function rpsPick(id, c){
   if(S.phase !== 'rps' || !S.alive.includes(id) || ![0,1,2].includes(c)) return;
@@ -679,6 +705,7 @@ function resolveRps(){
 
 /* ----- 사다리타기 ----- */
 function startLadder(){
+  ensureBot();
   const ps = S.players.filter(p => p.on);
   if(ps.length < MIN){ toast('최소 2명이 필요해요'); return; }
   const N = ps.length;
@@ -691,7 +718,7 @@ function startLadder(){
   if(mode === 'host'){ S.lad.arr = ids.slice(); push(); return; }     /* 방장이 직접 배치: 방장이 시작할 때까지 대기 */
   S.secs = PICK_SECS;
   lpTimer = setTimeout(() => { if(S.phase === 'lpick') ladderRun(); }, PICK_SECS * 1000 + 1200);   /* 시간 안에 못 고른 사람은 랜덤 배정 */
-  push();
+  push(); botLadder();
 }
 function ladderCol(id, c){
   if(S.phase !== 'lpick' || S.lad.mode !== 'pick' || !S.lad.ids.includes(id)) return;
@@ -780,6 +807,7 @@ function ladFinish(){
 
 /* ----- 퀴즈: 방장이 문제를 내고, 빨리 낸 순서대로 답변이 쌓임. 방장이 정답자를 고름 ----- */
 function startQuiz(next){
+  ensureBot();
   const text = qText.trim();
   if(!text){ toast('문제를 입력해 주세요'); return; }
   const ids = S.players.filter(p => p.on && p.id !== myId).map(p => p.id);
@@ -791,7 +819,7 @@ function startQuiz(next){
   qAns = []; qMark = {};
   S.rk++; S.picked = []; S.phase = 'quiz'; S.result = null;
   clearTimeout(qTimer); qTimer = setTimeout(closeQuiz, PICK_SECS * 1000 + 1200);
-  push();
+  push(); botQuiz();
 }
 function closeQuiz(){
   if(S.phase !== 'quiz' || S.q.closed) return;
@@ -821,6 +849,7 @@ function finishQuiz(){
 
 /* ----- 스피드: 5→0 카운트다운, 0이 된 뒤 가장 빨리 '당첨!' 버튼 누르기 ----- */
 function startSpeed(){
+  ensureBot();
   const ps = S.players.filter(p => p.on);
   if(ps.length < MIN){ toast('최소 2명이 필요해요'); return; }
   const ids = ps.map(p => p.id);
@@ -828,7 +857,7 @@ function startSpeed(){
   S.game = 'speed'; S.sp = { ids }; spRes = {};
   S.rk++; S.picked = []; S.phase = 'speed'; S.result = null;
   clearTimeout(spTimer); spTimer = setTimeout(resolveSpeed, SP_COUNT * 1000 + 1500 + 2500);
-  push();
+  push(); botSpeed();
 }
 function speedPress(id, rt){
   if(S.phase !== 'speed' || !S.sp.ids.includes(id) || spRes[id] != null) return;
@@ -960,23 +989,23 @@ function lobbyHtml(){
   const online = S.players.filter(p => p.on).length;
   if(!isHost) return `<h2>방장이 게임을 고르는 중…</h2><p class="sub" style="margin:0">잠시만 기다려 주세요. 접속 ${online}명</p>${tallyHtml()}`;
   if(setupGame) return setupHtml(setupGame, online);
-  const ok2 = online >= MIN, okQ = online - 1 >= 1;
-  const gb = (g, ok, label) => `<button class="btn pri gbtn" type="button" data-go="${g}" ${ok?'':'disabled'}><span class="gi">${GTITLE[g].split(' ')[0]}</span>${label}</button>`;
-  return `<h2>게임 선택</h2>
-    <div class="games4">${gb('rps', ok2, '가위바위보')}${gb('ladder', ok2, '사다리타기')}${gb('speed', ok2, '스피드<br>(0초 맞추기)')}${gb('quiz', okQ, '퀴즈풀기')}</div>
-    ${online<MIN?'<div class="sub center" data-sync="hint" style="margin-top:10px">2명 이상 모이면 시작할 수 있어요 (퀴즈는 방장 외 1명) · 방 코드 <b>'+esc(room)+'</b></div>':'<div class="sub center" style="margin-top:10px">방 코드 <b>'+esc(room)+'</b></div>'}
+  const solo = online <= 1, np = solo ? 2 : online;      /* 혼자면 연습봇 1명과 함께 */
+  const gb = (g, label) => `<button class="btn pri gbtn" type="button" data-go="${g}"><span class="gi">${GTITLE[g].split(' ')[0]}</span>${label}</button>`;
+  return `${ruleBlock(np)}
+    <h2 style="margin-top:16px">게임 선택</h2>
+    <div class="games4">${gb('rps', '가위바위보')}${gb('ladder', '사다리타기')}${gb('speed', '스피드<br>(0초 맞추기)')}${gb('quiz', '퀴즈풀기')}</div>
+    ${solo?'<div class="sub center" style="margin-top:10px">🤖 혼자라서 <b>연습 모드</b> — 연습봇과 함께 해봐요 · 방 코드 <b>'+esc(room)+'</b></div>':'<div class="sub center" style="margin-top:10px">방 코드 <b>'+esc(room)+'</b></div>'}
     <button class="btn sm" type="button" data-a="close" style="margin-top:10px">방 닫기</button>${tallyHtml()}`;
 }
 function ruleBlock(np){
-  const npc = Math.max(np, 1), r = ruleFor('rps', npc), mk = maxK(npc);
+  const r = ruleFor('rps', np), mk = maxK(np);
   const ko = [...Array(mk).keys()].map(i => i + 1).map(k => `<option value="${k}" ${k===r.k?'selected':''}>당첨 ${k}명</option>`).join('');
   const ro = `<option value="pay" ${r.role==='pay'?'selected':''}>당첨자가 쏜다</option><option value="free" ${r.role==='free'?'selected':''}>당첨자는 면제</option>`;
-  return `<div class="setup-sec"><div class="sub" style="margin-bottom:4px">당첨 규칙 · 기본 당첨 인원은 참여 인원(${npc}명)의 절반</div>
+  return `<div class="rulebar"><div class="sub" style="margin-bottom:4px">당첨 규칙 · 기본 당첨 인원은 참여 인원(${np}명)의 절반</div>
     <div class="row" style="flex-wrap:nowrap"><select data-cfg="k" aria-label="당첨 인원">${ko}</select><select data-cfg="role" aria-label="당첨자 규칙">${ro}</select></div></div>`;
 }
 function setupHtml(g, online){
-  const np = g === 'quiz' ? online - 1 : online;
-  const ok = g === 'quiz' ? online - 1 >= 1 : online >= MIN;
+  const ok = online >= 1;
   const DESC = {
     rps: `${RPS_SECS}초 안에 가위·바위·보를 고르고, 진 사람이 당첨 인원만큼 남을 때까지 반복해요.`,
     ladder: '번호(이름 위치)를 정하면 사다리가 공개되고 한 명씩 내려가요.',
@@ -995,9 +1024,9 @@ function setupHtml(g, online){
       <div class="row" style="flex-wrap:nowrap;margin-top:8px"><span class="sub" style="white-space:nowrap">반복 횟수</span><select data-cfg="qn" aria-label="문제 수">${no}</select></div></div>`;
   }
   return `<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2 style="margin:0">${GTITLE[g]}</h2><button class="btn sm" type="button" data-a="back">← 게임 선택</button></div>
-    <div class="sub" style="margin:6px 0 0">${DESC[g]}</div>${ruleBlock(np)}${extra}
+    <div class="sub" style="margin:6px 0 0">${DESC[g]}</div>${extra}
     <button class="btn pri full" type="button" data-a="${g}" style="margin-top:16px;padding:16px;font-size:17px" ${ok?'':'disabled'}>${g==='quiz'?'퀴즈 시작':GTITLE[g].split(' ').slice(1).join(' ')+' 시작'}</button>
-    ${ok?'':'<div class="sub center" data-sync="hint" style="margin-top:8px">사람이 더 모이면 시작할 수 있어요</div>'}`;
+`;
 }
 
 /* ----- 가위바위보 ----- */
