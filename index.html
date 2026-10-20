@@ -419,12 +419,32 @@ function updateBanner(){
     showBanner('방장 연결이 확인되지 않아요. 방이 닫혔거나 방장 폰이 꺼졌을 수 있어요.');
     return;
   }
-  if(S && !isHost && !S.players.some(p=>p.id===myId) && S.players.length >= MAX){
+  if(S && !isHost && !S.players.some(p=>p.id===myId) && onlineCnt() >= MAX){
     showBanner('정원(30명)이 가득 찼어요.'); return;
   }
   b.hidden = true;
 }
 setInterval(updateBanner, 2000);
+const onlineCnt = () => S ? S.players.filter(p => p.on).length : 0;
+
+/* 참가자가 방장과 다른 브로커에 붙어 버린 경우(방장 신호가 12초 넘게 없음) 다른 브로커로 옮겨 방장을 찾음 */
+setInterval(() => {
+  if(room && !isHost && connected && Date.now() - joinedAt > 9000 && Date.now() - lastHb > 12000){
+    brokerIdx++; startConn();
+  }
+}, 3000);
+
+/* 화면 꺼짐 방지: 특히 방장 폰이 잠기면 모든 사람의 게임이 멈춤 */
+let wakeLock = null;
+async function keepAwake(){
+  try{
+    if(!room || wakeLock || !('wakeLock' in navigator) || document.visibilityState !== 'visible') return;
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => { wakeLock = null; });
+  }catch(e){ wakeLock = null; }
+}
+function releaseAwake(){ try{ wakeLock && wakeLock.release(); }catch(e){} wakeLock = null; }
+document.addEventListener('visibilitychange', () => { if(document.visibilityState === 'visible') keepAwake(); });
 
 function startConn(){
   if(cli){ try{ cli.end(true); }catch(e){} cli = null; }
@@ -494,7 +514,7 @@ function onState(m){
   if(isHost){ if(!published && m.host !== myId) collision = true; return; }
   if(m.host === myId){ becomeHost(m); return; }
   S = m;
-  if(!S.players.some(p => p.id === myId) && S.players.length < MAX && Date.now() - lastJoinSent > 2000) sendJoin();
+  if(!S.players.some(p => p.id === myId) && onlineCnt() < MAX && Date.now() - lastJoinSent > 2000) sendJoin();
   render();
 }
 function becomeHost(m){
@@ -520,7 +540,7 @@ function enterRoomUI(){
   $('#rcode').textContent = room;
   lastStageHtml = ''; lastPhaseR = ''; prevPhase = '';
   setHash(room);
-  render();
+  render(); keepAwake();
 }
 function createRoom(retry){
   if(!retry && !readName()) return;
@@ -546,7 +566,7 @@ function leaveRoom(silent){
   cli = null; room = null; isHost = false; S = null; published = false; connected = false;
   $('#room').hidden = true; $('#entry').hidden = false; $('#banner').hidden = true;
   $('#lwrap').hidden = true; animIdx = -2;
-  setHash('');
+  setHash(''); releaseAwake();
   $('#entryMsg').textContent = '';
 }
 
@@ -559,10 +579,18 @@ function push(){
 }
 const pl = id => S.players.find(p => p.id === id);
 const nm = id => { const p = pl(id); return p ? p.name : '?'; };
-function uniqueName(n){
+function uniqueName(n, selfId){
   let base = n, k = 2, cur = n;
-  while(S.players.some(p => p.name === cur)) cur = base + k++;
+  while(S.players.some(p => p.name === cur && p.id !== selfId)) cur = base + k++;
   return cur;
+}
+/* 정원이 찼을 때: 이미 나간(오프라인) 사람 중 진행 중인 게임에 끼어 있지 않은 사람의 자리를 비워 줌 */
+function evictOffline(){
+  const busy = new Set([].concat(S.alive || [], S.rpool || [], (S.lad && S.lad.ids) || [], S.qids || [], (S.sp && S.sp.ids) || []));
+  const i = S.players.findIndex(p => !p.on && !p.bot && p.id !== S.host && !busy.has(p.id));
+  if(i < 0) return false;
+  S.players.splice(i, 1);
+  return true;
 }
 
 function handleAction(m){
@@ -571,9 +599,9 @@ function handleAction(m){
   switch(m.t){
     case 'join': {
       const p = pl(id);
-      if(p){ p.on = true; if(m.name) p.name = m.name; }
+      if(p){ p.on = true; if(m.name && m.name !== p.name) p.name = uniqueName(String(m.name).slice(0,8), id); }
       else{
-        if(S.players.length >= MAX) return;
+        if(S.players.length >= MAX && !evictOffline()) return;
         S.players.push({ id, name: uniqueName(String(m.name||'?').slice(0,8)), on:true });
       }
       push(); break;
@@ -889,13 +917,18 @@ function spState(){
 function speedPressLocal(){
   if(!S || S.phase !== 'speed' || mySp || !S.sp || !S.sp.ids.includes(myId)) return;
   const rt = Date.now() - (rkStart + SP_COUNT * 1000);
-  if(rt < 0){ mySp = { foul:true }; beep(200, .3, 'sawtooth', .2); vib([60,40,60]); act({ t:'sp', rt:-1 }); }
-  else{ mySp = { ms: Math.round(rt) }; beep(880, .1); vib(40); act({ t:'sp', rt }); }
+  if(rt < 0){ if(!act({ t:'sp', rt:-1 })) return; mySp = { foul:true }; beep(200, .3, 'sawtooth', .2); vib([60,40,60]); }
+  else{ if(!act({ t:'sp', rt })) return; mySp = { ms: Math.round(rt) }; beep(880, .1); vib(40); }
   render();
 }
 
 /* ============ 화면 그리기 ============ */
-function act(o){ o.id = myId; if(isHost) handleAction(o); else pub('a', o); }
+function act(o){
+  o.id = myId;
+  if(isHost){ handleAction(o); return true; }
+  if(!cli || !cli.connected){ toast('연결이 잠깐 끊겼어요. 다시 눌러 주세요'); return false; }
+  pub('a', o); return true;
+}
 
 function chip(id, cls){ const p = pl(id); if(!p) return ''; return `<span class="chip ${cls||''} ${id===myId?'me':''} ${p.on?'':'off'}">${esc(p.name)}</span>`; }
 const chips = (ids, cls) => `<div class="chips">${ids.map(id => chip(id, cls)).join('')}</div>`;
@@ -1379,8 +1412,8 @@ $('#vol').addEventListener('input', e => {
 function submitAnswer(){
   const el = $('#qAns'); const t = el ? el.value.trim() : '';
   if(!t){ toast('답을 입력해 주세요'); return; }
-  qMine = t.slice(0, 60); qSent = true;
-  act({ t:'ans', text:t }); render();
+  if(!act({ t:'ans', text:t })) return;
+  qMine = t.slice(0, 60); qSent = true; render();
 }
 
 /* 스피드 버튼은 손가락이 닿는 순간(pointerdown)에 반응 */
@@ -1391,8 +1424,9 @@ $('#stage').addEventListener('pointerdown', e => {
 $('#stage').addEventListener('click', e => {
   const b = e.target.closest('button'); if(!b || b.disabled) return;
   if(b.dataset.sp != null) return;
+  keepAwake();
   beep(440, .05);
-  if(b.dataset.p != null){ myPick = +b.dataset.p; act({t:'pick', c: myPick}); render(); return; }
+  if(b.dataset.p != null){ const c = +b.dataset.p; if(act({t:'pick', c})) myPick = c; render(); return; }
   if(b.dataset.c != null){ act({t:'col', c: +b.dataset.c}); return; }
   if(b.dataset.mark != null){ qMark[b.dataset.mark] = !qMark[b.dataset.mark]; render(); return; }
   if(b.dataset.go != null){ setupGame = b.dataset.go; render(); return; }
