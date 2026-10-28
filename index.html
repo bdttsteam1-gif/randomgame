@@ -333,7 +333,7 @@ let raceTimer = null, picks = {}, rpsTimer = null, spRes = {}, spTimer = null, l
 let vTimer = null, vVoted = new Set(), vTally = [], vDraft = { q:'', opts:['', ''], mode:'host' };
 
 /* ============ 소리 / 진동 ============ */
-let actx = null, noiseBuf = null, master = null;
+let actx = null, noiseBuf = null, master = null, rvIn = null;
 function ac(){
   try{
     if(!actx){
@@ -342,30 +342,43 @@ function ac(){
       const comp = actx.createDynamicsCompressor();
       comp.threshold.value = -10; comp.knee.value = 8; comp.ratio.value = 12; comp.attack.value = 0.003; comp.release.value = 0.15;
       master.connect(comp); comp.connect(actx.destination);
+      /* 짧은 잔향(리버브): 소리가 밋밋하지 않고 공간감 있게 */
+      const len = Math.floor(actx.sampleRate * 1.5), ib = actx.createBuffer(2, len, actx.sampleRate);
+      for(let c = 0; c < 2; c++){ const d = ib.getChannelData(c); for(let i = 0; i < len; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / len, 2.6); }
+      const conv = actx.createConvolver(); conv.buffer = ib;
+      const wet = actx.createGain(); wet.gain.value = 0.3;
+      rvIn = actx.createGain(); rvIn.connect(conv); conv.connect(wet); wet.connect(master);
     }
     if(actx.state === 'suspended') actx.resume();
     return actx;
   }catch(e){ return null; }
 }
-/* 음 하나: at 초 뒤에 시작, slideTo가 있으면 그 음높이로 미끄러짐 */
+/* 음 하나: at 초 뒤에 시작, slideTo가 있으면 그 음높이로 미끄러짐. 부드러운 시작음 + (톱니/사각파는) 살짝 어긋난 두 번째 소리로 두툼하게 + 잔향 */
 function tone(freq, dur, type, vol, at, slideTo){
   if(!sound) return;
   const a = ac(); if(!a) return;
   try{
-    const t = a.currentTime + (at || 0);
-    const o = a.createOscillator(), g = a.createGain();
-    o.type = type || 'sine';
-    o.frequency.setValueAtTime(freq, t);
-    if(slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
-    g.gain.setValueAtTime(vol || 0.15, t);
+    const t = a.currentTime + (at || 0), v = vol || 0.15, ty = type || 'sine';
+    const g = a.createGain();
+    g.gain.setValueAtTime(0.0001, t);
+    g.gain.linearRampToValueAtTime(v, t + Math.min(0.012, dur / 4));
     g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    o.connect(g); g.connect(master || a.destination);
-    o.start(t); o.stop(t + dur + 0.03);
+    g.connect(master || a.destination);
+    if(rvIn){ const w = a.createGain(); w.gain.value = dur > 0.2 ? 0.35 : 0.12; g.connect(w); w.connect(rvIn); }
+    const mk = det => {
+      const o = a.createOscillator(); o.type = ty;
+      o.frequency.setValueAtTime(freq, t);
+      if(slideTo) o.frequency.exponentialRampToValueAtTime(slideTo, t + dur);
+      if(det) o.detune.value = det;
+      o.connect(g); o.start(t); o.stop(t + dur + 0.03);
+    };
+    mk(0);
+    if(ty === 'sawtooth' || ty === 'square') mk(9);
   }catch(e){}
 }
 const beep = (freq, dur, type, vol) => tone(freq, dur, type, vol, 0);
 /* 잡음(북 스틱·심벌 느낌) */
-function noise(dur, vol, at, hp){
+function noise(dur, vol, at, hp, lp){
   if(!sound) return;
   const a = ac(); if(!a) return;
   try{
@@ -378,7 +391,10 @@ function noise(dur, vol, at, hp){
     const f = a.createBiquadFilter(); f.type = 'highpass'; f.frequency.value = hp || 1200;
     const g = a.createGain();
     g.gain.setValueAtTime(vol || 0.1, t); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
-    src.connect(f); f.connect(g); g.connect(master || a.destination);
+    let last = f;
+    if(lp){ const l = a.createBiquadFilter(); l.type = 'lowpass'; l.frequency.value = lp; f.connect(l); last = l; }
+    src.connect(f); last.connect(g); g.connect(master || a.destination);
+    if(rvIn && dur > 0.2){ const w = a.createGain(); w.gain.value = 0.25; g.connect(w); w.connect(rvIn); }
     src.start(t); src.stop(t + dur + 0.03);
   }catch(e){}
 }
@@ -392,6 +408,43 @@ function drumRoll(ms, vol){
     t += 125 - 90 * p; i++;
   }
   noise(0.5, v * 1.1, ms / 1000, 2500);   /* 마지막 심벌 */
+}
+function kick(at, vol){ tone(150, 0.2, 'sine', vol || 0.5, at, 42); noise(0.03, (vol || 0.5) * 0.3, at, 3000); }
+function snare(at, vol){ noise(0.15, vol || 0.3, at, 1800); tone(190, 0.1, 'triangle', (vol || 0.3) * 0.6, at, 120); }
+function bell(f, at, vol){ const v = vol || 0.12; tone(f, 1.0, 'sine', v, at); tone(f * 2.76, 0.55, 'sine', v * 0.4, at); tone(f * 5.4, 0.25, 'sine', v * 0.2, at); }
+function cheer(dur, vol, at){ for(let i = 0; i < 3; i++) noise(dur * (0.6 + 0.2 * i), (vol || 0.15) * (1 - i * 0.15), (at || 0) + i * 0.08, 500, 3200 + i * 900); }
+function uiClick(){ tone(560, 0.05, 'triangle', 0.1, 0, 380); noise(0.018, 0.05, 0, 4500); }
+/* 레이스 엔진음: 계속 울리다가 진행도에 따라 높아짐 */
+let eng = null;
+function engineStart(){
+  if(!sound || eng) return;
+  const a = ac(); if(!a) return;
+  try{
+    const o = a.createOscillator(), o2 = a.createOscillator(), lfo = a.createOscillator(), lg = a.createGain(), f = a.createBiquadFilter(), g = a.createGain();
+    o.type = 'sawtooth'; o2.type = 'square'; o.frequency.value = 62; o2.frequency.value = 31;
+    f.type = 'lowpass'; f.frequency.value = 380; f.Q.value = 4;
+    g.gain.value = 0.0001; lfo.frequency.value = 16; lg.gain.value = 0.012;
+    lfo.connect(lg); lg.connect(g.gain);
+    o.connect(f); o2.connect(f); f.connect(g); g.connect(master || a.destination);
+    o.start(); o2.start(); lfo.start();
+    g.gain.linearRampToValueAtTime(0.045, a.currentTime + 0.6);
+    eng = { o, o2, lfo, f, g };
+  }catch(e){ eng = null; }
+}
+function engineSet(p, boost){
+  if(!eng) return;
+  if(!sound){ engineStop(); return; }
+  try{
+    const t = actx.currentTime, k = Math.max(0, Math.min(1, p)) + (boost ? 0.25 : 0);
+    eng.o.frequency.setTargetAtTime(62 + 120 * k, t, 0.12); eng.o2.frequency.setTargetAtTime(31 + 60 * k, t, 0.12);
+    eng.f.frequency.setTargetAtTime(380 + 1000 * k, t, 0.12);
+  }catch(e){}
+}
+function engineStop(){
+  if(!eng) return;
+  const e = eng; eng = null;
+  try{ e.g.gain.cancelScheduledValues(0); e.g.gain.setTargetAtTime(0.0001, actx.currentTime, 0.15); }catch(x){}
+  setTimeout(() => { try{ e.o.stop(); e.o2.stop(); e.lfo.stop(); }catch(x){} }, 700);
 }
 function heartbeat(at, vol){
   const v = vol || 0.4;
@@ -424,11 +477,11 @@ function runnerSound(ms, last){   /* 사다리 내려가는 동안: 똑딱 소�
 }
 function sadSound(){      /* 쏘는 사람: 뿌우… */
   [392, 370, 349].forEach((f, i) => tone(f, 0.38, 'sawtooth', 0.13, i * 0.4, f * 0.93));
-  tone(330, 1.1, 'sawtooth', 0.14, 1.2, 150);
+  tone(330, 1.1, 'sawtooth', 0.14, 1.2, 150); tone(165, 1.2, 'sawtooth', 0.07, 1.2, 75);
 }
 function fanfare(){       /* 면제/구경: 팡파르 */
-  [523, 659, 784, 1047].forEach((f, i) => tone(f, 0.28, 'triangle', 0.2, i * 0.13));
-  tone(1047, 0.7, 'triangle', 0.18, 0.55); tone(784, 0.7, 'triangle', 0.12, 0.55); noise(0.5, 0.1, 0.55, 5000);
+  [523, 659, 784, 1047].forEach((f, i) => { tone(f, 0.28, 'triangle', 0.2, i * 0.13); tone(f / 2, 0.28, 'sawtooth', 0.05, i * 0.13); });
+  [1047, 784, 659].forEach(f => tone(f, 0.9, 'triangle', 0.14, 0.55)); bell(1568, 0.6, 0.1); cheer(1.5, 0.15, 0.55); noise(0.5, 0.1, 0.55, 5000);
 }
 function resultSound(R){
   if(!R) return;
@@ -1105,7 +1158,7 @@ function drawRace(now){
   sim.events.forEach((e, k) => {
     if(tsC >= e.t0 && !rc.evSeen[k]){
       rc.evSeen[k] = 1;
-      if(tsC - e.t0 < 1.5){ if(e.type === 'boost') tone(700, .3, 'sawtooth', .12, 0, 1500); else if(e.type === 'spin') tone(420, .35, 'square', .1, 0, 120); else beep(520, .25, 'triangle', .15); }
+      if(tsC - e.t0 < 1.5){ if(e.type === 'boost'){ noise(.5, .16, 0, 1500); tone(300, .5, 'sawtooth', .09, 0, 1400); } else if(e.type === 'spin'){ tone(1900, .45, 'sawtooth', .05, 0, 900); noise(.4, .12, 0, 3000); } else { bell(784, 0, .12); bell(659, .25, .1); } }
     }
   });
   const ev = evs[evs.length - 1];
@@ -1147,6 +1200,10 @@ function drawRace(now){
     if(rc.cdN !== (el < RACE_CD ? n : 0)){ rc.cdN = el < RACE_CD ? n : 0; if(rc.cdN) beep(520 + (3 - rc.cdN) * 140, .15); else { beep(1200, .3, 'square', .22); vib(80); } }
   }
 
+  /* 엔진음은 진행도에 맞춰, 선두가 결승선을 넘으면 환호 */
+  if(lead >= L){ if(!rc.finSnd){ rc.finSnd = 1; engineStop(); cheer(1.8, .2); bell(1047, 0, .12); bell(1319, .12, .1); vib([100, 50, 100]); } }
+  else if(tsC > 0){ engineStart(); engineSet(lead / L, Object.keys(boostOf).length > 0); }
+
   /* 글자 정보(바뀔 때만 DOM 갱신) */
   const st = lead >= L ? '결승선 통과!' : M >= N ? '전체 보기' : '상위 ' + M + '대 집중 중계';
   if(rc.stTxt !== st){ rc.stTxt = st; const e = $('#rst'); if(e) e.textContent = st; }
@@ -1166,7 +1223,7 @@ function drawRace(now){
 }
 function rcLoop(now){
   rcRaf = false;
-  if(!S || S.phase !== 'race' || !S.race) return;
+  if(!S || S.phase !== 'race' || !S.race){ engineStop(); return; }
   try{ drawRace(now); }catch(e){ console.error(e); }
   rcRaf = true; requestAnimationFrame(rcLoop);
 }
@@ -1470,6 +1527,7 @@ function render(){
     if(S.phase === 'rpick') beep(660, .2, 'triangle', .2);
     if(S.phase === 'race'){ riser(RACE_CD, .06); rcState = null; }
     if(S.phase === 'rrev'){ revSeen = -1; drumRoll(900, .2); }
+    if(S.phase !== 'race') engineStop();
     if(S.phase === 'result'){ resultSound(S.result); vib([200,80,200]); }
     if(S.phase !== 'ladder'){ ladSeen = {}; lastLadIdx = -2; }
     prevPhase = S.phase;
@@ -1879,8 +1937,12 @@ setInterval(() => {
       revSeen = n;
       if(n > 0){
         const r = S.race.N - n + 1, win = S.race.wr.includes(r);
-        if(r <= 3) { tone(300 + (4 - r) * 150, .35, 'triangle', .22); vib(r === 1 ? [120,60,120] : 60); }
-        else if(win) tone(260, .12, 'square', .09); else tone(520 + (n % 6) * 40, .08, 'triangle', .1);
+        if(r === 3){ kick(0, .5); bell(523, 0, .14); vib(60); }
+        else if(r === 2){ snare(0, .35); bell(659, 0, .16); vib(60); }
+        else if(r === 1){ kick(0, .6); [523, 659, 784, 1047].forEach(f => tone(f, .8, 'triangle', .13, .05)); cheer(1.2, .18, .05); vib([120, 60, 120]); }
+        else if(win){ kick(0, .35); tone(220, .15, 'square', .07); }
+        else tone(700 + (n % 7) * 60, .07, 'triangle', .13);
+        if(r <= 3 && win) tone(110, .6, 'sawtooth', .15, .02, 52);
       }
       render();
       const e = $('#rv-last'); if(e && e.scrollIntoView) e.scrollIntoView({ block:'center', behavior: first ? 'auto' : 'smooth' });
@@ -2048,7 +2110,7 @@ $('#stage').addEventListener('click', e => {
   const b = e.target.closest('button'); if(!b || b.disabled) return;
   if(b.dataset.sp != null) return;
   keepAwake();
-  beep(440, .05);
+  uiClick();
   if(b.dataset.p != null){ const c = +b.dataset.p; if(act({t:'pick', c})) myPick = c; render(); return; }
   if(b.dataset.c != null){ act({t:'col', c: +b.dataset.c}); return; }
   if(b.dataset.car != null){ act({t:'car', c: +b.dataset.car}); return; }
