@@ -96,6 +96,15 @@ select{padding:8px;border:1px solid var(--line);border-radius:6px;background:#ff
 .bomb{font-size:110px;line-height:1.25;animation:bbshake .5s infinite}
 @keyframes bbshake{0%,100%{transform:rotate(-6deg) translateX(-2px)}50%{transform:rotate(6deg) translateX(2px)}}
 .blpop{font-size:120px;line-height:210px}
+@keyframes blgrow{0%{transform:scale(var(--s0))}45%{transform:scale(calc(var(--s1) * 1.07))}100%{transform:scale(var(--s1))}}
+.gb{display:inline-block;min-width:22px;text-align:center;padding:0 7px;border-radius:999px;color:#fff;font-size:12px;font-weight:800;line-height:1.6}
+.grp{display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--line);border-radius:10px;margin-top:6px}
+.grp .gm{display:flex;flex-wrap:wrap;gap:5px;flex:1}
+.gtr{display:flex;align-items:center;gap:6px;margin-top:6px}
+.gtr .gbts{display:flex;flex-wrap:wrap;gap:6px;flex:1}
+.gtr .gbts button{flex:1 1 64px;min-height:46px;padding:4px;border:1.5px solid var(--line);border-radius:8px;background:#fff;font-weight:700;font-size:14px;line-height:1.15}
+.gtr .gbts button small{display:block;font-weight:500;font-size:10.5px;color:var(--fg3)}
+.gtr .gbts button:disabled{background:var(--paper2)!important;color:var(--fg3)}
 .tbars{display:flex;flex-direction:column;gap:6px;margin:10px 0 0;padding:10px 12px;border:1px solid var(--line2);border-radius:8px;background:#fff;min-height:40px}
 .tbar{display:flex;align-items:center;gap:8px;font-size:13px}
 .tbar .tn{width:64px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
@@ -261,6 +270,15 @@ select{padding:8px;border:1px solid var(--line);border-radius:6px;background:#ff
   #stage > .btn.sm{align-self:flex-start}
   #stage > .spbtn{width:100%}
   #stage > .qbox{width:100%}
+}
+/* PC(넓은 화면): 묶음 제목은 숨기고 카드를 모두 같은 크기로 한 판에 펼침 */
+@media (min-width:900px){
+  .gall{display:grid;grid-template-columns:repeat(auto-fill,minmax(176px,1fr));gap:14px;margin-top:8px}
+  .gall .gblk,.gall .games4{display:contents}
+  .gall .gsec{display:none}
+  .gall .games4 .gbtn,.gall .games4 .gbtn.gwide{grid-column:auto;flex-direction:column;justify-content:center;min-height:132px;padding:16px 10px;gap:6px;font-size:18px}
+  .gall .games4 .gbtn .gi,.gall .games4 .gbtn.gwide .gi{font-size:40px}
+  .gall .gbtn.gwide .gl{text-align:center}
 }
 </style>
 </head>
@@ -786,6 +804,7 @@ function handleAction(m){
     case 'ms': moleSubmit(id, m.n); break;
     case 'tc': tapCountMsg(id, m.n); break;
     case 'bp': blAct(id, m.a); break;
+    case 'bg': blgAct(id, m.a); break;
     case 'bt': bbThrow(id, m.to); break;
     case 'tf': tapSubmit(id, m.n); break;
     case 'vreg': voteReg(id); break;       /* '투표했다'는 사실만 등록 (선택 내용은 별도 경로로 옴) */
@@ -1000,6 +1019,58 @@ function raceSim(seed, N){
 }
 
 
+/* ----- 조 추첨 (6명 이상 풍선·폭탄) ----- */
+/* 조 크기는 당첨 인원 k를 반으로 나눈 두 가지(a=⌊k/2⌋, b=⌈k/2⌉). 한 조가 터지면 그 조 전체가 당첨, 남은 자리(need)에 맞는 크기의 조끼리 이어서 해요. */
+const GC = [['#fff3da', '#a86a00'], ['#e0eefa', '#2d6fa8'], ['#e2f0da', '#3f7a2a'], ['#efe5f7', '#7b4aa3'], ['#fde4e8', '#b0405a']];
+const glabel = i => String.fromCharCode(65 + i % 26) + (i >= 26 ? Math.floor(i / 26) : '');
+function makeGroups(ids, k){
+  const n = ids.length, a = Math.floor(k / 2), b = Math.ceil(k / 2);
+  if(a < 1 || n < 2 * a || n < 6) return null;
+  let sizes = [];
+  const even = () => { const g = Math.floor(n / a); sizes = Array(g).fill(a); for(let i = 0, r = n - g * a; r > 0; i = (i + 1) % g, r--) sizes[i]++; };
+  if(a === b) even();
+  else{
+    let best = null;
+    for(let y = 1; b * y < n; y++){ const rem = n - b * y; if(rem > 0 && rem % a === 0){ const x = rem / a, d = Math.abs(x - y); if(!best || d < best.d) best = { x, y, d }; } }
+    if(best) sizes = shuffle([...Array(best.x).fill(a), ...Array(best.y).fill(b)]);
+    else even();
+  }
+  if(sizes.length < 2 || sizes.length > 8) return null;
+  const sh = shuffle(ids); let at = 0;
+  return sizes.map((z, i) => { const m = sh.slice(at, at + z); at += z; return { l: glabel(i), m }; });
+}
+function gElig(groups, remain, need){
+  let e = remain.filter(l => groups[l].length === need);
+  if(!e.length) e = remain.filter(l => groups[l].length <= need);
+  if(!e.length) e = remain.slice();
+  return e;
+}
+function gWinners(members, prio, need){
+  if(members.length <= need) return members.slice();
+  const first = []; prio.forEach(x => { if(members.includes(x) && !first.includes(x)) first.push(x); });
+  return first.concat(shuffle(members.filter(x => !first.includes(x)))).slice(0, need);
+}
+const gOf = (B, id) => B.gl.find(l => B.groups[l].includes(id));
+const gcol = (B, l) => GC[B.gl.indexOf(l) % GC.length];
+const gBadge = (B, l, txt) => `<span class="gb" style="background:${gcol(B, l)[1]}">${txt || l}</span>`;
+const gChip = (B, l, id, extra) => { const c = gcol(B, l); return `<span class="chip ${id === myId ? 'me' : ''}" style="background:${c[0]};border-color:${c[1]}">${esc(nm(id))}${extra || ''}</span>`; };
+function gteamHtml(){
+  const B = S.gt === 'bomb' ? S.bb : S.bl, need = B.k;
+  const a = Math.floor(need / 2), b = Math.ceil(need / 2);
+  const rows = B.gl.map(l => { const c = gcol(B, l); return `<div class="grp" style="background:${c[0]};border-color:${c[1]}"><span style="min-width:74px">${gBadge(B, l)} <b>${B.groups[l].length}명 조</b></span><div class="gm">${B.groups[l].map(id => gChip(B, l, id, id === myId ? '(나)' : '')).join('')}</div></div>`; }).join('');
+  const rule = a === b ? `한 조가 터지면 그 조 전원이 당첨돼요. 남은 자리가 다 찰 때까지 이어서 해요.` : `<b>${a}명 조</b>가 터지면 → 남은 자리 ${b}명, <b>${b}명 조</b>끼리 이어서<br><b>${b}명 조</b>가 터지면 → 남은 자리 ${a}명, <b>${a}명 조</b>끼리 이어서`;
+  return `<h2 style="text-align:center">${S.gt === 'bomb' ? '💣 폭탄 돌리기' : '🎈 풍선 불기'} · 조 추첨 결과</h2>
+    <div class="center sub">당첨 ${need}명 = ${a === b ? a + '명씩' : a + '명 조 + ' + b + '명 조'}. ${B.ids.length}명을 ${B.gl.length}개 조로 나눴어요. 조는 한 몸이라 터지면 조 전체가 당첨!</div>
+    ${rows}<div class="sub" style="margin-top:12px;line-height:1.6">${rule}</div>
+    <div class="center sub" style="margin-top:8px">조 편성은 확정이에요. 다시 섞을 수 없어요.</div>
+    ${isHost ? `<button class="btn pri full" type="button" data-a="gstart" style="margin-top:12px;padding:16px;font-size:17px">${S.gt === 'bomb' ? '폭탄 돌리기' : '풍선 불기'} 시작</button>` : `<p class="center sub" style="margin-top:12px">방장이 시작하면 바로 진행돼요</p>`}`;
+}
+function gStart(){
+  if(S.phase !== 'gteam') return;
+  mgClear('gtA');
+  if(S.gt === 'bomb') bbNew(); else blgNew();
+}
+
 /* ----- 폭탄 돌리기 ----- */
 /* 폭탄은 숨은 시간(방장만 앎)이 지나면 터지고, 터질 때 들고 있던 사람이 당첨으로 확정돼요. */
 const BB_SECS = 5, BB_CD = 2.5;
@@ -1011,12 +1082,20 @@ function startBomb(){
   const ids = ps.map(p => p.id);
   S.rule = ruleFor('bomb', ids.length);
   S.game = 'bomb'; S.result = null;
+  const gs = makeGroups(ids, S.rule.k);
+  if(gs){
+    const groups = {}; gs.forEach(g => { groups[g.l] = g.m; });
+    S.bb = { gm: 1, ids, groups, gl: gs.map(g => g.l), remain: gs.map(g => g.l), elig: gs.map(g => g.l), alive: ids.slice(), won: [], k: S.rule.k, holder: null, from: null, round: 1, bk: 0, boom: null, hist: [] };
+    S.gt = 'bomb'; S.rk++; S.phase = 'gteam'; push();
+    mgSet('gtA', gStart, 20000);
+    return;
+  }
   S.bb = { ids, alive: ids.slice(), won: [], k: S.rule.k, holder: null, from: null, round: 1, bk: 0, boom: null };
   bbNew();
 }
 function bbNew(){
   const B = S.bb;
-  B.holder = B.alive[rnd(B.alive.length)]; B.from = null; B.boom = null; B.bk++;
+  B.holder = B.alive[rnd(B.alive.length)]; B.from = null; B.boom = null; B.bk++; if(B.gm) B.hist = [B.holder];
   bbSince = Date.now();
   S.secs = BB_SECS; S.rk++; S.phase = 'bomb'; push();
   mgSet('bbF', bbBoom, (B.alive.length <= 3 ? 5000 : 8000) + rnd(9000));        /* 터지는 시간은 비밀 */
@@ -1039,13 +1118,26 @@ function bbThrow(id, to, force){
   const B = S.bb;
   if(S.phase !== 'bomb' || B.boom || id !== B.holder || !B.alive.includes(to) || to === id) return;
   if(!force && to === B.from && Date.now() - bbSince < BB_CD * 1000) return;       /* 방금 준 사람에게는 바로 못 돌려줘요 */
-  B.from = id; B.holder = to; bbSince = Date.now();
+  B.from = id; B.holder = to; bbSince = Date.now(); if(B.gm) B.hist.push(to);
   S.secs = BB_SECS; S.rk++; push(); bbArm();
 }
 function bbBoom(){
   const B = S.bb; if(S.phase !== 'bomb' || B.boom) return;
   mgClear('bbT'); mgClear('bbF');
   const id = B.holder;
+  if(B.gm){
+    const g = gOf(B, id), need = B.k - B.won.length, ws = gWinners(B.groups[g], B.hist.slice().reverse(), need);
+    B.boom = id; B.bg = g; B.ws = ws; B.won.push(...ws); B.remain = B.remain.filter(l => l !== g);
+    S.rk++; push();
+    mgSet('bbN', () => {
+      if(S.phase !== 'bomb') return;
+      if(B.won.length >= B.k || !B.remain.length){ finishGame('bomb', B.won.slice(), B.ids.slice(), {}); return; }
+      B.round++; B.elig = gElig(B.groups, B.remain, B.k - B.won.length);
+      B.alive = B.elig.flatMap(l => B.groups[l]);
+      bbNew();
+    }, 3600);
+    return;
+  }
   B.boom = id; B.won.push(id); B.alive = B.alive.filter(x => x !== id);
   S.rk++; push();
   mgSet('bbN', () => {
@@ -1054,7 +1146,40 @@ function bbBoom(){
     else{ B.round++; bbNew(); }
   }, 3300);
 }
+function bombGHtml(){
+  const B = S.bb, mine = B.holder === myId && !B.boom, my = gOf(B, myId);
+  const el = (Date.now() - rkStart) / 1000, cd = B.from && el < BB_CD;
+  const left = Math.max(0, S.secs - Math.floor(el));
+  const age = (Date.now() - bbBorn) / 1000;
+  const spd = Math.max(0.12, 0.7 - 0.55 * Math.min(1, age / 16)).toFixed(2);
+  let h = `<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2 style="margin:0">💣 폭탄 돌리기</h2><b style="font-size:14px;color:var(--red)">당첨 확정 ${B.won.length} / ${B.k}명</b></div>`;
+  if(B.boom){
+    const need = B.k - B.won.length, nx = need > 0 ? gElig(B.groups, B.remain, need) : [];
+    h += `<div class="blbox"><div class="blpop pop">💥</div></div><div class="win-name pop">${esc(nm(B.boom))} 님 손에서 터졌어요!</div>
+      <div class="center" style="margin:6px 0">${gBadge(B, B.bg, B.bg + '조')} <b>${B.ws.length}명 당첨</b></div><div class="chips" style="justify-content:center">${B.ws.map(id => gChip(B, B.bg, id)).join('')}</div>
+      <div class="center sub" style="margin-top:8px">${need <= 0 ? '당첨 인원이 모두 정해졌어요' : `남은 자리 ${need}명 → ${nx.map(l => gBadge(B, l, l + '조 ' + B.groups[l].length + '명')).join(' ')} 이어서 해요`}</div>`;
+  }else{
+    const hg = gOf(B, B.holder);
+    h += `<div class="row" style="justify-content:space-between;flex-wrap:nowrap;margin-top:4px"><b style="font-size:18px;${mine ? 'color:var(--red)' : ''}">${mine ? '폭탄이 내게 왔어요!' : '폭탄을 가진 사람: ' + esc(nm(B.holder))}</b><b id="tm" style="font-size:22px;color:var(--red)">${left}</b></div>
+      <div class="blbox"><div class="bomb" style="animation-duration:${spd}s">💣</div></div>
+      <div class="center sub">언제 터질지 아무도 몰라요 · 터지면 <b style="color:var(--fg)">${hg}조 전체(${B.groups[hg].length}명)</b>가 당첨${B.from ? ' · 방금 ' + esc(nm(B.from)) + ' → ' + esc(nm(B.holder)) : ''}</div>`;
+    if(mine){
+      h += `<div class="sub" style="margin-top:10px">누구에게 던질까요? 받은 사람의 조가 위험해져요</div>` + B.elig.map(l => {
+        const c = gcol(B, l), ms = B.groups[l].filter(id => id !== myId);
+        return `<div class="gtr"><span style="min-width:36px">${gBadge(B, l)}</span><div class="gbts">${ms.map(id => { const blk = cd && id === B.from; return `<button type="button" data-bt="${esc(id)}" style="border-color:${c[1]};background:${c[0]}" ${blk ? 'disabled' : ''}>${esc(short(nm(id)))}<small>${blk ? '방금 준 사람' : (l === my ? '내 조' : ' ')}</small></button>`; }).join('')}</div></div>`;
+      }).join('');
+    }else if(!B.alive.includes(myId)){
+      h += `<p class="sub center" style="margin-top:10px">${B.won.includes(myId) ? '이미 당첨 확정! 구경 중이에요 👀' : '이번 폭탄은 구경만 해요 👀 (조 인원이 남은 자리와 달라요)'}</p>`;
+    }else{
+      h += `<p class="sub center" style="margin-top:10px">폭탄이 오면 빨리 던지세요! 터질 때 우리 조원이 들고 있어도 조 전체가 당첨이에요.</p>`;
+    }
+    h += `<div class="sub" style="margin-top:10px">진행 중인 조</div>` + B.elig.map(l => { const c = gcol(B, l); return `<div class="grp" style="background:${c[0]};border-color:${c[1]}">${gBadge(B, l)}<div class="gm">${B.groups[l].map(id => gChip(B, l, id, id === B.holder ? ' 💣' : '')).join('')}</div></div>`; }).join('');
+  }
+  if(B.won.length) h += `<div class="sub" style="margin-top:10px">당첨 확정</div>${chips(B.won, 'lose')}`;
+  return h;
+}
 function bombHtml(){
+  if(S.bb.gm) return bombGHtml();
   const B = S.bb, mine = B.holder === myId && !B.boom;
   const el = (Date.now() - rkStart) / 1000, cd = B.from && el < BB_CD;
   const left = Math.max(0, S.secs - Math.floor(el));
@@ -1098,8 +1223,9 @@ function bombTick(){          /* 폭탄이 오래될수록 똑딱 소리가 빨�
 
 /* ----- 풍선 불기 ----- */
 /* 돌아가며 5초 안에 펌프(또는 패스 1회). 터지는 크기는 방장만 알고, 터질 때 누른 사람이 당첨으로 확정돼요. */
-const BL_SECS = 5, BL_GROUP = 6;
-let blThr = 0;
+const BL_SECS = 3, BL_GROUP = 6;
+let blAt = 0, blThr = 0, blSizeSeen = -1, blScPrev = 1, blScCur = 1, blSizeAt = 0, blgMine = { tn: -1, n: 0 };
+const BL_TURN = 4, BL_MAXP = 2;
 function startBalloon(){
   ensureBot();
   const ps = S.players.filter(p => p.on);
@@ -1107,6 +1233,14 @@ function startBalloon(){
   const ids = ps.map(p => p.id);
   S.rule = ruleFor('balloon', ids.length);
   S.game = 'balloon'; S.result = null;
+  const gs = makeGroups(ids, S.rule.k);
+  if(gs){
+    const groups = {}; gs.forEach(g => { groups[g.l] = g.m; });
+    S.bl = { gm: 1, ids, groups, gl: gs.map(g => g.l), remain: gs.map(g => g.l), elig: [], ord: [], ci: 0, cur: null, size: 0, cap: 0, used: {}, tot: 0, prev: null, pop: null, won: [], k: S.rule.k, round: 1, tn: 0 };
+    S.gt = 'balloon'; S.rk++; S.phase = 'gteam'; push();
+    mgSet('gtA', gStart, 20000);
+    return;
+  }
   S.bl = { ids, alive: ids.slice(), won: [], k: S.rule.k, size: 0, cur: null, passes: {}, order: [], pop: null, round: 1, last: null };
   blNew();
 }
@@ -1115,15 +1249,15 @@ function blNew(){
   B.order = shuffle(B.alive).slice(0, BL_GROUP);          /* 한 풍선에는 최대 6명만 참여(나머지는 구경) → 인원이 많아도 길어지지 않아요 */
   const n = B.order.length;
   B.size = 0; B.passes = {}; B.pop = null; B.last = null; B.cur = B.order[0];
-  blThr = Math.ceil(n * 0.9) + rnd(Math.ceil(n * 1.2)) + 2;
+  blAt = Date.now() + 20000 + Math.random() * 20000;          /* 인원과 상관없이 20~40초 사이 랜덤 → 그 시간이 지난 뒤 처음 누른 펌프에서 터져요 */
   S.secs = BL_SECS; S.rk++; S.phase = 'balloon'; push();
   blArm();
 }
 function blArm(){
   const B = S.bl;
-  mgSet('blT', () => blAct(B.cur, 'pump'), (BL_SECS + 1.2) * 1000);        /* 시간 안에 못 고르면 자동 펌프 */
+  mgSet('blT', () => blAct(B.cur, 'pump'), (BL_SECS + 0.6) * 1000);        /* 시간 안에 못 고르면 자동 펌프 */
   if(B.cur === BOT && pl(BOT)){
-    botWait(() => { if(S.phase === 'balloon' && S.bl.cur === BOT) blAct(BOT, !S.bl.passes[BOT] && Math.random() < 0.2 ? 'pass' : 'pump'); }, 800 + Math.random() * 1600);
+    botWait(() => { if(S.phase === 'balloon' && S.bl.cur === BOT) blAct(BOT, !S.bl.passes[BOT] && Math.random() < 0.2 ? 'pass' : 'pump'); }, 350 + Math.random() * 700);
   }
 }
 function blAct(id, kind){
@@ -1134,7 +1268,7 @@ function blAct(id, kind){
     B.passes[id] = 1; B.last = { id, a: 'pass' }; blNext(); return;
   }
   B.size++; B.last = { id, a: 'pump' };
-  if(B.size >= blThr) blBurst(id); else blNext();
+  if(Date.now() >= blAt) blBurst(id); else blNext();
 }
 function blNext(){
   const B = S.bl, i = B.order.indexOf(B.cur);
@@ -1150,19 +1284,118 @@ function blBurst(id){
     if(S.phase !== 'balloon') return;
     if(B.won.length >= B.k) finishGame('balloon', B.won.slice(), B.ids.slice(), {});
     else{ B.round++; blNew(); }
-  }, 3300);
+  }, 2600);
+}
+function blgNew(){
+  const B = S.bl, need = B.k - B.won.length;
+  B.elig = gElig(B.groups, B.remain, need);
+  const m = B.elig.reduce((t, l) => t + B.groups[l].length, 0);
+  blThr = 6 * m + rnd(4 * m + 1);                     /* 참여 인원 m명 기준 6m~10m번 (비밀) */
+  B.cap = 10 * m;
+  B.ord = shuffle(B.elig); B.ci = 0; B.cur = B.ord[0];
+  B.size = 0; B.used = {}; B.tot = 0; B.prev = null; B.pop = null; B.tn++;
+  S.secs = BL_TURN; S.rk++; S.phase = 'balloon'; push();
+  blgArm();
+}
+function blgArm(){
+  const B = S.bl, tn = B.tn;
+  mgSet('blT', () => {
+    if(S.phase !== 'balloon' || !S.bl || !S.bl.gm || S.bl.tn !== tn || S.bl.pop) return;
+    if(S.bl.tot < 1){ const mem = S.bl.groups[S.bl.cur]; blgAct(mem[rnd(mem.length)], 'pump'); if(!S.bl || S.bl.pop || S.bl.tn !== tn) return; }
+    blgEnd();
+  }, (BL_TURN + 0.6) * 1000);
+  if(B.groups[B.cur].includes(BOT) && pl(BOT)){
+    const n = rnd(3);
+    for(let i = 0; i < n; i++) botWait(() => { if(S.phase === 'balloon' && S.bl && S.bl.gm && S.bl.tn === tn) blgAct(BOT, 'pump'); }, 500 + i * 800 + Math.random() * 500);
+  }
+}
+function blgAct(id, kind){
+  const B = S.bl;
+  if(!B || !B.gm || S.phase !== 'balloon' || B.pop || !B.groups[B.cur].includes(id)) return;
+  if(kind === 'pass'){ if(B.tot >= 1) blgEnd(); return; }
+  if((B.used[id] || 0) >= BL_MAXP) return;
+  B.used[id] = (B.used[id] || 0) + 1; B.tot++; B.size++;
+  if(B.size >= blThr){ blgBurst(id); return; }
+  if(B.groups[B.cur].every(x => (B.used[x] || 0) >= BL_MAXP)){ blgEnd(); return; }
+  push();
+}
+function blgEnd(){
+  const B = S.bl; mgClear('blT');
+  B.prev = { g: B.cur, n: B.tot };
+  B.ci = (B.ci + 1) % B.ord.length; B.cur = B.ord[B.ci]; B.used = {}; B.tot = 0; B.tn++;
+  S.secs = BL_TURN; S.rk++; push(); blgArm();
+}
+function blgBurst(id){
+  const B = S.bl; mgClear('blT');
+  const need = B.k - B.won.length, g = B.cur, ws = gWinners(B.groups[g], [id], need);
+  B.pop = { id, g, ws }; B.won.push(...ws); B.remain = B.remain.filter(l => l !== g);
+  S.rk++; push();
+  mgSet('blN', () => {
+    if(S.phase !== 'balloon') return;
+    if(B.won.length >= B.k || !B.remain.length) finishGame('balloon', B.won.slice(), B.ids.slice(), {});
+    else{ B.round++; blgNew(); }
+  }, 3600);
+}
+function blSvg(size, denom, tense){
+  const sc = 0.4 + 0.6 * Math.min(1, size / denom);
+  if(size !== blSizeSeen){ blScPrev = (blSizeSeen < 0 || size < blSizeSeen) ? sc : blScCur; blScCur = sc; blSizeSeen = size; blSizeAt = Date.now(); }
+  const el = Date.now() - blSizeAt, an = el < 500 && blScPrev !== blScCur ? `animation:blgrow .5s ease-out ${-el}ms both;` : '';
+  return `<svg viewBox="0 0 120 150" class="bln ${tense ? 'tense' : ''}" style="--s0:${blScPrev.toFixed(3)};--s1:${blScCur.toFixed(3)};transform:scale(${blScCur.toFixed(3)});transition:none;${an}" role="img" aria-label="풍선"><path d="M60 8C97 8 114 36 106 62C100 84 78 98 60 100C42 98 20 84 14 62C6 36 23 8 60 8Z" fill="#d94a3a"/><path d="M60 100L55 108H65Z" fill="#b53a2c"/><path d="M60 108C54 118 66 124 60 138" stroke="#4d4f46" stroke-width="1.6" fill="none"/><ellipse cx="38" cy="38" rx="9" ry="15" transform="rotate(25 38 38)" fill="#fff" opacity=".35"/></svg>`;
+}
+function balloonGHtml(){
+  const B = S.bl, my = gOf(B, myId), curG = B.cur, mineG = my === curG && !B.pop;
+  const left = Math.max(0, S.secs - Math.floor((Date.now() - rkStart) / 1000));
+  let h = `<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2 style="margin:0">🎈 풍선 불기</h2><b style="font-size:14px;color:var(--red)">당첨 확정 ${B.won.length} / ${B.k}명</b></div>`;
+  if(B.pop){
+    const P = B.pop, need = B.k - B.won.length, nx = need > 0 ? gElig(B.groups, B.remain, need) : [];
+    h += `<div class="blbox"><div class="blpop pop">💥</div></div><div class="win-name pop">${esc(nm(P.id))} 님이 터뜨렸어요!</div>
+      <div class="center" style="margin:6px 0">${gBadge(B, P.g, P.g + '조')} <b>${P.ws.length}명 당첨</b></div><div class="chips" style="justify-content:center">${P.ws.map(id => gChip(B, P.g, id)).join('')}</div>
+      <div class="center sub" style="margin-top:8px">${need <= 0 ? '당첨 인원이 모두 정해졌어요' : `남은 자리 ${need}명 → ${nx.map(l => gBadge(B, l, l + '조 ' + B.groups[l].length + '명')).join(' ')} 새 풍선으로 이어가요`}</div>`;
+  }else{
+    const tense = B.size >= B.cap * 0.6;
+    h += `<div class="row" style="justify-content:space-between;flex-wrap:nowrap;margin-top:4px"><span style="display:flex;gap:8px;align-items:center">${gBadge(B, curG, curG + '조')}<b style="font-size:18px;${mineG ? 'color:var(--red)' : ''}">${mineG ? '우리 조 차례예요!' : curG + '조 차례…'}</b></span><b id="tm" style="font-size:22px;color:var(--red)">${left}</b></div>
+      <div class="blbox">${blSvg(B.size, B.cap, tense)}</div>
+      <div class="center" style="background:var(--paper2);border:1px solid var(--line);border-radius:8px;padding:8px;font-size:14px">${B.prev ? `직전 <b>${B.prev.g}조</b>가 <b style="color:var(--red);font-size:18px">${B.prev.n}번</b> 눌렀어요` : '첫 차례예요 · 총 펌프 횟수와 터지는 시점은 비밀!'}</div>`;
+    if(mineG){
+      if(blgMine.tn !== B.tn) blgMine = { tn: B.tn, n: 0 };
+      const used = Math.max(B.used[myId] || 0, blgMine.n), rem = Math.max(0, BL_MAXP - used);
+      h += `<div class="center sub" style="margin-top:8px">한 사람당 이번 턴 최대 ${BL_MAXP}번 · ${B.groups[curG].map(id => `${id === myId ? '<b style="color:var(--fg)">나</b>' : esc(short(nm(id)))} ${id === myId ? used : (B.used[id] || 0)}/${BL_MAXP}`).join(' · ')}</div>
+        <div style="display:flex;gap:8px;margin-top:10px"><button class="btn" type="button" data-bg="pass" style="flex:1;min-height:60px" ${B.tot < 1 ? 'disabled' : ''}>넘기기<br><small>${B.tot < 1 ? '1번 이상 눌러야 해요' : '다음 조로'}</small></button><button class="btn pri" type="button" data-bg="pump" style="flex:2;min-height:60px;font-size:22px" ${rem <= 0 ? 'disabled' : ''}>펌프!<br><small>내 펌프 ${rem}번 남음</small></button></div>`;
+    }else if(B.won.includes(myId)){
+      h += `<p class="sub center" style="margin-top:10px">이미 당첨 확정! 구경 중이에요 👀</p>`;
+    }else if(!B.elig.includes(my)){
+      h += `<p class="sub center" style="margin-top:10px">이번 풍선은 구경만 해요 👀 (조 인원이 남은 자리와 달라요)</p>`;
+    }else{
+      h += `<p class="sub center" style="margin-top:10px">${my}조 차례를 기다리는 중… 터지는 펌프를 누른 사람의 조 전체가 당첨!</p>`;
+    }
+    h += `<div class="sub" style="margin-top:12px">차례 순서 (조 단위)</div><div class="chips">${B.gl.map(l => {
+      const c = gcol(B, l), inord = B.elig.includes(l), cur = l === curG;
+      return `<span class="chip ${l === my ? 'me' : ''}" style="background:${inord ? c[0] : '#eeefe9'};border-color:${cur ? c[1] : 'var(--line2)'};border-width:${cur ? 2 : 1}px;${inord ? '' : 'opacity:.55'}">${gBadge(B, l)} ${B.groups[l].length}명${!B.remain.includes(l) ? ' ✓' : ''}</span>`;
+    }).join('')}</div>`;
+  }
+  if(B.won.length) h += `<div class="sub" style="margin-top:10px">당첨 확정</div>${chips(B.won, 'lose')}`;
+  return h;
+}
+function blgPress(kind){
+  const B = S.bl; if(!B || !B.gm || S.phase !== 'balloon' || B.pop) return;
+  if(kind === 'pump'){
+    if(blgMine.tn !== B.tn) blgMine = { tn: B.tn, n: 0 };
+    if(Math.max(B.used[myId] || 0, blgMine.n) >= BL_MAXP) return;
+    blgMine.n++; vib(12);
+  }
+  if(act({ t: 'bg', a: kind }) && kind === 'pump') render();
 }
 function balloonHtml(){
+  if(S.bl.gm) return balloonGHtml();
   const B = S.bl, mine = B.cur === myId && !B.pop, amAlive = B.order.includes(myId);
   const left = Math.max(0, S.secs - Math.floor((Date.now() - rkStart) / 1000));
-  const sc = (0.55 + 0.45 * Math.min(1, B.size / (B.order.length * 2.2 + 2))).toFixed(2);
-  const tense = B.size >= B.order.length * 1.6 + 1;
+  const tense = B.size >= 10;
   let h = `<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2 style="margin:0">🎈 풍선 불기</h2><b style="font-size:14px;color:var(--red)">당첨 확정 ${B.won.length} / ${B.k}명</b></div>`;
   if(B.pop){
     h += `<div class="blbox"><div class="blpop pop">💥</div></div><div class="win-name pop">${esc(nm(B.pop.id))} 님 당첨!</div><div class="center sub">${B.won.length >= B.k ? '당첨 인원이 모두 정해졌어요' : '새 풍선으로 계속해요'}</div>`;
   }else{
     h += `<div class="row" style="justify-content:space-between;flex-wrap:nowrap;margin-top:4px"><b style="font-size:18px;${mine ? 'color:var(--red)' : ''}">${mine ? '내 차례예요!' : esc(nm(B.cur)) + ' 님 차례…'}</b><b id="tm" style="font-size:22px;color:var(--red)">${left}</b></div>
-      <div class="blbox"><svg viewBox="0 0 120 150" class="bln ${tense ? 'tense' : ''}" style="transform:scale(${sc})" role="img" aria-label="풍선"><path d="M60 8C97 8 114 36 106 62C100 84 78 98 60 100C42 98 20 84 14 62C6 36 23 8 60 8Z" fill="#d94a3a"/><path d="M60 100L55 108H65Z" fill="#b53a2c"/><path d="M60 108C54 118 66 124 60 138" stroke="#4d4f46" stroke-width="1.6" fill="none"/><ellipse cx="38" cy="38" rx="9" ry="15" transform="rotate(25 38 38)" fill="#fff" opacity=".35"/></svg></div>
+      <div class="blbox">${blSvg(B.size, 14, tense)}</div>
       <div class="center sub">지금까지 펌프 <b style="color:var(--fg)">${B.size}번</b>${tense ? ' · 풍선이 팽팽해요!' : ''}${B.last ? ` · 방금 ${esc(nm(B.last.id))} ${B.last.a === 'pass' ? '패스' : '펌프'}` : ''}</div>`;
     if(mine){
       const canPass = !B.passes[myId];
@@ -2070,7 +2303,7 @@ function render(){
     prevPhase = S.phase;
   }
   if(S.phase === 'ladder' && S.lad && S.lad.rungs) ladderSounds();
-  if(S.phase === 'balloon') balloonFx(); else blSeen = '';
+  if(S.phase === 'balloon') balloonFx(); else{ blSeen = ''; blSizeSeen = -1; }
   if(S.phase === 'bomb') bombFx();
 
   let h = '';
@@ -2088,6 +2321,7 @@ function render(){
     case 'rrev': h = rrevHtml(); break;
     case 'bomb': h = bombHtml(); break;
     case 'balloon': h = balloonHtml(); break;
+    case 'gteam': h = gteamHtml(); break;
     case 'tap': h = tapHtml(); break;
     case 'mole': h = moleHtml(); break;
     case 'mpick': h = mpickHtml(); break;
@@ -2157,7 +2391,7 @@ function lobbyHtml(){
   const LB = {
     rps:'가위바위보', ladder:'사다리타기', quiz:'퀴즈풀기', vote:'익명투표함', speed:'5초 만들기<br><small>5초에 가깝게</small>',
     tap:'연타 대결<br><small>10초 동안 연타</small>', mole:'두더지 잡기<br><small>20초 · 구멍 6개</small>', balloon:'풍선 불기<br><small>터지면 당첨</small>',
-    bomb:'폭탄 돌리기<br><small>들고 있으면 당첨</small>', minor:'소수 카드 토너먼트<br><small>3명~ · 소수(또는 다수)만 생존</small>', race:'자동차 레이스<br><small>5명 이하 10초 · 20명 이상 45초</small>'
+    bomb:'폭탄 돌리기<br><small>들고 있으면 당첨</small>', minor:'소수 카드 토너먼트<br><small>3명~ · 눈치 싸움</small>', race:'자동차 레이스<br><small>인원 따라 10~45초</small>'
   };
   const GROUPS = [
     ['기본 게임', '모두가 한 번에', ['rps', 'ladder', 'quiz', 'vote']],
@@ -2168,11 +2402,11 @@ function lobbyHtml(){
   const groups = GROUPS.map(([t, d, gs]) => {
     const list = gs.filter(g => GTITLE[g] && LB[g] && !HIDDEN_GAMES.includes(g));
     if(!list.length) return '';
-    return `<div class="gsec"><b>${t}</b><span>${d}</span></div><div class="games4">${list.map((g, i) => gb(g, LB[g], (list.length % 2 === 1 && i === list.length - 1) || list.length === 1 ? 'gwide' : '')).join('')}</div>`;
+    return `<div class="gblk"><div class="gsec"><b>${t}</b><span>${d}</span></div><div class="games4">${list.map((g, i) => gb(g, LB[g], (list.length % 2 === 1 && i === list.length - 1) || list.length === 1 ? 'gwide' : '')).join('')}</div></div>`;
   }).join('');
   return `${ruleBlock(np)}
     <h2 style="margin-top:16px">게임 선택</h2>
-    ${groups}
+    <div class="gall">${groups}</div>
     ${solo?'<div class="sub center" style="margin-top:10px">🤖 혼자라서 <b>연습 모드</b> — 연습봇과 함께 해봐요 · 방 코드 <b>'+esc(room)+'</b></div>':'<div class="sub center" style="margin-top:10px">방 코드 <b>'+esc(room)+'</b></div>'}
     <button class="btn sm" type="button" data-a="close" style="margin-top:10px">방 닫기</button>${tallyHtml()}`;
 }
@@ -2191,8 +2425,8 @@ function setupHtml(g, online){
     speed: `${SP_LEAD}초 준비 후 스톱워치가 시작돼요. ${SP_SHOW}초 뒤 숫자가 사라지면 마음속으로 세다가 ${SP_TARGET}초라고 느껴질 때 "멈춰!"를 누르세요. ${SP_TARGET}초에 가장 가까운 순서대로 당첨돼요. (예: 4.48초보다 5.02초가 더 가까워요)`,
     quiz: `문제를 내면 ${PICK_SECS}초 안에 답이 빨리 낸 순서대로 쌓여요. 정답자를 고르면 빠른 순서대로 당첨돼요.`,
     race: `각자 자동차를 고르고 ${PICK_SECS}초 뒤 레이스가 시작돼요. 결승선 통과 순서가 순위이고, 순위는 꼴찌부터 빠르게 발표해요. 당첨 순위는 꼴찌부터 정한 인원(기본: 참여 인원의 절반)이거나 직접 고른 순위예요. (레이스 길이: 5명 이하 10초 · 15명 이하 20초 · 20명 이상 45초)`,
-    bomb: `폭탄이 한 명에게 가고, 그 사람이 ${BB_SECS}초 안에 다른 사람을 눌러 던져요(방금 준 사람에게는 ${BB_CD}초간 못 돌려줘요). 터지는 시간은 아무도 몰라요. 터질 때 들고 있던 사람이 당첨으로 확정되고, 당첨 인원이 찰 때까지 새 폭탄으로 반복해요.`,
-    balloon: `돌아가며 ${BL_SECS}초 안에 펌프(또는 패스 1회)를 골라요. 풍선이 터지는 크기는 방장도 몰라요. 터지는 순간 펌프를 누른 사람이 당첨으로 확정되고, 당첨 인원이 찰 때까지 새 풍선으로 반복해요. 한 풍선에는 최대 ${BL_GROUP}명이 참여하고 나머지는 구경해요.`,
+    bomb: `폭탄이 한 명에게 가고, 그 사람이 ${BB_SECS}초 안에 다른 사람을 눌러 던져요(방금 준 사람에게는 ${BB_CD}초간 못 돌려줘요). 터지는 시간은 아무도 몰라요. 터질 때 들고 있던 사람이 당첨으로 확정되고, 당첨 인원이 찰 때까지 새 폭탄으로 반복해요. 6명 이상이면 조 추첨: 터질 때 든 사람의 조 전체가 당첨이고, 남은 자리에 맞는 조끼리 이어서 해요.`,
+    balloon: `돌아가며 ${BL_SECS}초 안에 펌프(또는 패스 1회)를 골라요. 풍선은 시작 후 20~40초 사이 랜덤한 시점부터 터질 수 있고(방장도 몰라요), 그 시점이 지난 뒤 처음 펌프를 누른 사람이 당첨으로 확정되고, 당첨 인원이 찰 때까지 새 풍선으로 반복해요. 한 풍선에는 최대 ${BL_GROUP}명이 참여하고 나머지는 구경해요. 6명 이상이면 조 추첨: 당첨 인원을 반으로 나눈 크기의 조로 나뉘고, 조가 돌아가며 ${BL_TURN}초 동안 한 사람당 최대 ${BL_MAXP}번 펌프해요(터지는 횟수는 비밀, 직전 조 횟수만 공개). 터뜨린 조 전원이 당첨이고, 남은 자리에 맞는 조끼리 이어서 해요.`,
     tap: `${TAP_CD}초 준비 후 ${TAP_DUR}초 동안 버튼을 최대한 많이 눌러요. 모두의 횟수가 실시간 막대로 보이고, 가장 적게 누른 순서대로 당첨돼요.`,
     mole: `${MOLE_CD}초 준비 후 ${MOLE_DUR}초 동안 구멍 6개에서 두더지가 나와요. 두더지를 누르면 +1점, 빈 구멍을 누르면 -${MOLE_MISS}점이에요. 가장 적게 잡은 순서대로 당첨돼요.`,
     minor: '매 라운드 그림 카드 2장 중 하나를 10초 안에 골라요. 설정에 따라 사람이 더 적은(또는 더 많은) 카드를 고른 사람만 살아남아 계속해요. 3명부터 할 수 있어요.',
@@ -2688,6 +2922,8 @@ function submitAnswer(){
 $('#stage').addEventListener('pointerdown', e => {
   const tb = e.target.closest('[data-tap]');
   if(tb){ e.preventDefault(); if(!tb.disabled) tapPress(); return; }
+  const gb = e.target.closest('[data-bg]');
+  if(gb){ e.preventDefault(); if(!gb.disabled) blgPress(gb.dataset.bg); return; }
   const hb = e.target.closest('[data-hole]');
   if(hb){ e.preventDefault(); if(!hb.disabled) moleTap(+hb.dataset.hole); return; }
   const b = e.target.closest('[data-sp]'); if(!b || b.disabled) return;
@@ -2695,7 +2931,7 @@ $('#stage').addEventListener('pointerdown', e => {
 });
 $('#stage').addEventListener('click', e => {
   const b = e.target.closest('button'); if(!b || b.disabled) return;
-  if(b.dataset.sp != null || b.dataset.hole != null || b.dataset.tap != null) return;
+  if(b.dataset.sp != null || b.dataset.hole != null || b.dataset.tap != null || b.dataset.bg != null) return;
   keepAwake();
   uiClick();
   if(b.dataset.p != null){ const c = +b.dataset.p; if(act({t:'pick', c})) myPick = c; render(); return; }
@@ -2712,7 +2948,7 @@ $('#stage').addEventListener('click', e => {
     render(); return;
   }
   if(b.dataset.bt != null){ act({ t: 'bt', to: b.dataset.bt }); return; }
-  if(b.dataset.bp != null){ act({ t: 'bp', a: b.dataset.bp }); return; }
+  if(b.dataset.bp != null){ b.parentNode.querySelectorAll('button').forEach(x => x.disabled = true); act({ t: 'bp', a: b.dataset.bp }); return; }
   if(b.dataset.mc != null){ const c = +b.dataset.mc; if(act({t:'mc', c})) myMc = c; render(); return; }
   if(b.dataset.mm != null){ cfg.mmode = b.dataset.mm; render(); return; }
   if(b.dataset.mt != null){ const N = Math.max(3, S.players.filter(p => p.on).length); cfg.mt = Math.max(1, Math.min(N - 1, cfg.mt + +b.dataset.mt)); render(); return; }
@@ -2737,6 +2973,7 @@ $('#stage').addEventListener('click', e => {
     case 'mole': startMole(); break;
     case 'tap': startTap(); break;
     case 'balloon': startBalloon(); break;
+    case 'gstart': gStart(); break;
     case 'bomb': startBomb(); break;
     case 'raceGo': raceRun(); break;
     case 'vsub': submitVote(); break;
