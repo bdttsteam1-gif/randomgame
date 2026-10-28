@@ -89,14 +89,14 @@ canvas{display:block}
 select{padding:8px;border:1px solid var(--line);border-radius:6px;background:#fff;flex:1;min-width:0}
 /* 메인(게임 선택) / 게임 설정 */
 .games4{display:grid;grid-template-columns:1fr 1fr;gap:12px}
-.blbox{display:flex;justify-content:center;align-items:flex-end;height:210px;margin:6px 0;overflow:hidden}
-.bln{width:190px;height:237px;transform-origin:50% 100%;transition:transform .25s ease-out}
+.blbox{display:flex;justify-content:center;align-items:center;height:230px;margin:6px 0;overflow:hidden}
+.bln{width:170px;height:212px;transform-origin:50% 50%;transition:transform .25s ease-out}
 .bln.tense{animation:blshake .25s infinite}
 @keyframes blshake{0%,100%{translate:0 0}25%{translate:-3px 1px}75%{translate:3px -1px}}
 .bomb{font-size:110px;line-height:1.25;animation:bbshake .5s infinite}
 @keyframes bbshake{0%,100%{transform:rotate(-6deg) translateX(-2px)}50%{transform:rotate(6deg) translateX(2px)}}
 .blpop{font-size:120px;line-height:210px}
-@keyframes blgrow{0%{transform:scale(var(--s0))}45%{transform:scale(calc(var(--s1) * 1.07))}100%{transform:scale(var(--s1))}}
+@keyframes blgrow{0%{transform:translateY(var(--y0)) scale(var(--s0))}45%{transform:translateY(var(--y1)) scale(calc(var(--s1) * 1.07))}100%{transform:translateY(var(--y1)) scale(var(--s1))}}
 .gb{display:inline-block;min-width:22px;text-align:center;padding:0 7px;border-radius:999px;color:#fff;font-size:12px;font-weight:800;line-height:1.6}
 .grp{display:flex;align-items:center;gap:8px;padding:7px 10px;border:1px solid var(--line);border-radius:10px;margin-top:6px}
 .grp .gm{display:flex;flex-wrap:wrap;gap:5px;flex:1}
@@ -1223,8 +1223,8 @@ function bombTick(){          /* 폭탄이 오래될수록 똑딱 소리가 빨�
 
 /* ----- 풍선 불기 ----- */
 /* 돌아가며 5초 안에 펌프(또는 패스 1회). 터지는 크기는 방장만 알고, 터질 때 누른 사람이 당첨으로 확정돼요. */
-const BL_SECS = 3, BL_GROUP = 6;
-let blAt = 0, blThr = 0, blSizeSeen = -1, blScPrev = 1, blScCur = 1, blSizeAt = 0, blgMine = { tn: -1, n: 0 };
+const BL_SECS = 4, BL_GROUP = 6;
+let blAt = 0, blThr = 0, blSizeSeen = -1, blScPrev = 1, blScCur = 1, blSizeAt = 0, blYPrev = 0, blYCur = 0, blgMine = { tn: -1, n: 0 };
 const BL_TURN = 4, BL_MAXP = 2;
 function startBalloon(){
   ensureBot();
@@ -1248,31 +1248,37 @@ function blNew(){
   const B = S.bl;
   B.order = shuffle(B.alive).slice(0, BL_GROUP);          /* 한 풍선에는 최대 6명만 참여(나머지는 구경) → 인원이 많아도 길어지지 않아요 */
   const n = B.order.length;
-  B.size = 0; B.passes = {}; B.pop = null; B.last = null; B.cur = B.order[0];
+  B.size = 0; B.n = 0; B.pop = null; B.last = null; B.cur = B.order[0];
   blAt = Date.now() + 20000 + Math.random() * 20000;          /* 인원과 상관없이 20~40초 사이 랜덤 → 그 시간이 지난 뒤 처음 누른 펌프에서 터져요 */
   S.secs = BL_SECS; S.rk++; S.phase = 'balloon'; push();
   blArm();
 }
 function blArm(){
   const B = S.bl;
-  mgSet('blT', () => blAct(B.cur, 'pump'), (BL_SECS + 0.6) * 1000);        /* 시간 안에 못 고르면 자동 펌프 */
+  const rk0 = S.rk;
+  mgSet('blT', () => {                      /* 시간이 끝나면: 한 번도 못 눌렀으면 자동 펌프 1번, 그다음 다음 사람에게 넘어가요 */
+    if(S.phase !== 'balloon' || !S.bl || S.bl.gm || S.rk !== rk0 || S.bl.pop) return;
+    if(S.bl.n < 1){ blAct(S.bl.cur, 'pump'); if(S.bl.pop || S.rk !== rk0) return; }
+    blNext();
+  }, (BL_SECS + 0.6) * 1000);
   if(B.cur === BOT && pl(BOT)){
-    botWait(() => { if(S.phase === 'balloon' && S.bl.cur === BOT) blAct(BOT, !S.bl.passes[BOT] && Math.random() < 0.2 ? 'pass' : 'pump'); }, 350 + Math.random() * 700);
+    const two = Math.random() < 0.5;
+    botWait(() => { if(S.phase === 'balloon' && S.bl.cur === BOT && S.rk === rk0) blAct(BOT, 'pump'); }, 400 + Math.random() * 500);
+    if(!two) botWait(() => { if(S.phase === 'balloon' && S.bl.cur === BOT && S.rk === rk0) blAct(BOT, 'pass'); }, 1300 + Math.random() * 500);
+    else botWait(() => { if(S.phase === 'balloon' && S.bl.cur === BOT && S.rk === rk0) blAct(BOT, 'pump'); }, 1100 + Math.random() * 400);
   }
 }
 function blAct(id, kind){
   const B = S.bl;
   if(S.phase !== 'balloon' || B.pop || id !== B.cur) return;
-  if(kind === 'pass'){
-    if(B.passes[id]) return;
-    B.passes[id] = 1; B.last = { id, a: 'pass' }; blNext(); return;
-  }
-  B.size++; B.last = { id, a: 'pump' };
-  if(Date.now() >= blAt) blBurst(id); else blNext();
+  if(kind === 'pass'){ if(B.n >= 1){ B.last = { id, a: 'pass' }; blNext(); } return; }       /* 넘기기: 1번 이상 눌렀을 때만 */
+  if(B.n >= BL_MAXP) return;
+  B.n++; B.size++; B.last = { id, a: 'pump' };
+  if(Date.now() >= blAt) blBurst(id); else if(B.n >= BL_MAXP) blNext(); else push();
 }
 function blNext(){
   const B = S.bl, i = B.order.indexOf(B.cur);
-  B.cur = B.order[(i + 1) % B.order.length];
+  B.cur = B.order[(i + 1) % B.order.length]; B.n = 0;
   S.secs = BL_SECS; S.rk++; push(); blArm();
 }
 function blBurst(id){
@@ -1337,10 +1343,10 @@ function blgBurst(id){
   }, 3600);
 }
 function blSvg(size, denom, tense){
-  const sc = 0.4 + 0.6 * Math.min(1, size / denom);
-  if(size !== blSizeSeen){ blScPrev = (blSizeSeen < 0 || size < blSizeSeen) ? sc : blScCur; blScCur = sc; blSizeSeen = size; blSizeAt = Date.now(); }
+  const g = Math.min(1, size / denom), sc = 0.4 + 0.6 * g, y = (1 - g) * 62;      /* 작을 땐 아래쪽, 커질수록 가운데로 */
+  if(size !== blSizeSeen){ const fresh = blSizeSeen < 0 || size < blSizeSeen; blScPrev = fresh ? sc : blScCur; blYPrev = fresh ? y : blYCur; blScCur = sc; blYCur = y; blSizeSeen = size; blSizeAt = Date.now(); }
   const el = Date.now() - blSizeAt, an = el < 500 && blScPrev !== blScCur ? `animation:blgrow .5s ease-out ${-el}ms both;` : '';
-  return `<svg viewBox="0 0 120 150" class="bln ${tense ? 'tense' : ''}" style="--s0:${blScPrev.toFixed(3)};--s1:${blScCur.toFixed(3)};transform:scale(${blScCur.toFixed(3)});transition:none;${an}" role="img" aria-label="풍선"><path d="M60 8C97 8 114 36 106 62C100 84 78 98 60 100C42 98 20 84 14 62C6 36 23 8 60 8Z" fill="#d94a3a"/><path d="M60 100L55 108H65Z" fill="#b53a2c"/><path d="M60 108C54 118 66 124 60 138" stroke="#4d4f46" stroke-width="1.6" fill="none"/><ellipse cx="38" cy="38" rx="9" ry="15" transform="rotate(25 38 38)" fill="#fff" opacity=".35"/></svg>`;
+  return `<svg viewBox="0 0 120 150" class="bln ${tense ? 'tense' : ''}" style="--s0:${blScPrev.toFixed(3)};--s1:${blScCur.toFixed(3)};--y0:${blYPrev.toFixed(1)}px;--y1:${blYCur.toFixed(1)}px;transform:translateY(${blYCur.toFixed(1)}px) scale(${blScCur.toFixed(3)});transition:none;${an}" role="img" aria-label="풍선"><path d="M60 8C97 8 114 36 106 62C100 84 78 98 60 100C42 98 20 84 14 62C6 36 23 8 60 8Z" fill="#d94a3a"/><path d="M60 100L55 108H65Z" fill="#b53a2c"/><path d="M60 108C54 118 66 124 60 138" stroke="#4d4f46" stroke-width="1.6" fill="none"/><ellipse cx="38" cy="38" rx="9" ry="15" transform="rotate(25 38 38)" fill="#fff" opacity=".35"/></svg>`;
 }
 function balloonGHtml(){
   const B = S.bl, my = gOf(B, myId), curG = B.cur, mineG = my === curG && !B.pop;
@@ -1377,13 +1383,14 @@ function balloonGHtml(){
   return h;
 }
 function blgPress(kind){
-  const B = S.bl; if(!B || !B.gm || S.phase !== 'balloon' || B.pop) return;
+  const B = S.bl; if(!B || S.phase !== 'balloon' || B.pop) return;
+  const tn = B.gm ? B.tn : S.rk, used0 = B.gm ? (B.used[myId] || 0) : (B.n || 0);
+  if(blgMine.tn !== tn) blgMine = { tn, n: 0 };
   if(kind === 'pump'){
-    if(blgMine.tn !== B.tn) blgMine = { tn: B.tn, n: 0 };
-    if(Math.max(B.used[myId] || 0, blgMine.n) >= BL_MAXP) return;
+    if(Math.max(used0, blgMine.n) >= BL_MAXP) return;
     blgMine.n++; vib(12);
-  }
-  if(act({ t: 'bg', a: kind }) && kind === 'pump') render();
+  }else if(Math.max(used0, blgMine.n) < 1) return;
+  if(act({ t: B.gm ? 'bg' : 'bp', a: kind })) render();
 }
 function balloonHtml(){
   if(S.bl.gm) return balloonGHtml();
@@ -1396,16 +1403,17 @@ function balloonHtml(){
   }else{
     h += `<div class="row" style="justify-content:space-between;flex-wrap:nowrap;margin-top:4px"><b style="font-size:18px;${mine ? 'color:var(--red)' : ''}">${mine ? '내 차례예요!' : esc(nm(B.cur)) + ' 님 차례…'}</b><b id="tm" style="font-size:22px;color:var(--red)">${left}</b></div>
       <div class="blbox">${blSvg(B.size, 14, tense)}</div>
-      <div class="center sub">지금까지 펌프 <b style="color:var(--fg)">${B.size}번</b>${tense ? ' · 풍선이 팽팽해요!' : ''}${B.last ? ` · 방금 ${esc(nm(B.last.id))} ${B.last.a === 'pass' ? '패스' : '펌프'}` : ''}</div>`;
+      <div class="center sub">지금까지 펌프 <b style="color:var(--fg)">${B.size}번</b>${tense ? ' · 풍선이 팽팽해요!' : ''}${B.last ? ` · 방금 ${esc(nm(B.last.id))} ${B.last.a === 'pass' ? '넘기기' : '펌프'}` : ''}</div>`;
     if(mine){
-      const canPass = !B.passes[myId];
-      h += `<div style="display:flex;gap:8px;margin-top:12px"><button class="btn" type="button" data-bp="pass" style="flex:1;min-height:60px" ${canPass ? '' : 'disabled'}>패스<br><small>${canPass ? '1회 남음' : '사용함'}</small></button><button class="btn pri" type="button" data-bp="pump" style="flex:2;min-height:60px;font-size:22px">펌프!</button></div>`;
+      if(blgMine.tn !== S.rk) blgMine = { tn: S.rk, n: 0 };
+      const used = Math.max(B.n || 0, blgMine.n), rem = Math.max(0, BL_MAXP - used);
+      h += `<div class="center sub" style="margin-top:8px">한 번에 최대 ${BL_MAXP}번 펌프 · 이번 차례 ${used}/${BL_MAXP}</div><div style="display:flex;gap:8px;margin-top:10px"><button class="btn" type="button" data-bg="pass" style="flex:1;min-height:60px" ${used < 1 ? 'disabled' : ''}>넘기기<br><small>${used < 1 ? '1번 이상 눌러야 해요' : '다음 사람에게'}</small></button><button class="btn pri" type="button" data-bg="pump" style="flex:2;min-height:60px;font-size:22px" ${rem <= 0 ? 'disabled' : ''}>펌프!<br><small>펌프 ${rem}번 남음</small></button></div>`;
     }else if(!amAlive){
       h += `<p class="sub center" style="margin-top:10px">${B.won.includes(myId) ? '이미 당첨 확정! 구경 중이에요 👀' : '이번 풍선은 구경만 해요 👀 (다음 풍선에 뽑힐 수 있어요)'}</p>`;
     }else{
       h += `<p class="sub center" style="margin-top:10px">내 차례를 기다리는 중… 터지는 순간 누른 사람이 당첨!</p>`;
     }
-    h += `<div class="sub" style="margin-top:12px">차례 순서</div><div class="chips">${B.order.map(id => `<span class="chip ${id===myId?'me':''} ${id===B.cur?'ok':''}">${esc(nm(id))}${B.passes[id] ? ' (패스함)' : ''}</span>`).join('')}</div>`;
+    h += `<div class="sub" style="margin-top:12px">차례 순서</div><div class="chips">${B.order.map(id => `<span class="chip ${id===myId?'me':''} ${id===B.cur?'ok':''}">${esc(nm(id))}</span>`).join('')}</div>`;
   }
   if(B.won.length) h += `<div class="sub" style="margin-top:10px">당첨 확정</div>${chips(B.won, 'lose')}`;
   return h;
@@ -2426,7 +2434,7 @@ function setupHtml(g, online){
     quiz: `문제를 내면 ${PICK_SECS}초 안에 답이 빨리 낸 순서대로 쌓여요. 정답자를 고르면 빠른 순서대로 당첨돼요.`,
     race: `각자 자동차를 고르고 ${PICK_SECS}초 뒤 레이스가 시작돼요. 결승선 통과 순서가 순위이고, 순위는 꼴찌부터 빠르게 발표해요. 당첨 순위는 꼴찌부터 정한 인원(기본: 참여 인원의 절반)이거나 직접 고른 순위예요. (레이스 길이: 5명 이하 10초 · 15명 이하 20초 · 20명 이상 45초)`,
     bomb: `폭탄이 한 명에게 가고, 그 사람이 ${BB_SECS}초 안에 다른 사람을 눌러 던져요(방금 준 사람에게는 ${BB_CD}초간 못 돌려줘요). 터지는 시간은 아무도 몰라요. 터질 때 들고 있던 사람이 당첨으로 확정되고, 당첨 인원이 찰 때까지 새 폭탄으로 반복해요. 6명 이상이면 조 추첨: 터질 때 든 사람의 조 전체가 당첨이고, 남은 자리에 맞는 조끼리 이어서 해요.`,
-    balloon: `돌아가며 ${BL_SECS}초 안에 펌프(또는 패스 1회)를 골라요. 풍선은 시작 후 20~40초 사이 랜덤한 시점부터 터질 수 있고(방장도 몰라요), 그 시점이 지난 뒤 처음 펌프를 누른 사람이 당첨으로 확정되고, 당첨 인원이 찰 때까지 새 풍선으로 반복해요. 한 풍선에는 최대 ${BL_GROUP}명이 참여하고 나머지는 구경해요. 6명 이상이면 조 추첨: 당첨 인원을 반으로 나눈 크기의 조로 나뉘고, 조가 돌아가며 ${BL_TURN}초 동안 한 사람당 최대 ${BL_MAXP}번 펌프해요(터지는 횟수는 비밀, 직전 조 횟수만 공개). 터뜨린 조 전원이 당첨이고, 남은 자리에 맞는 조끼리 이어서 해요.`,
+    balloon: `돌아가며 ${BL_SECS}초 동안 한 번에 최대 ${BL_MAXP}번 펌프하고 '넘기기'로 다음 사람에게 넘겨요(1번 이상은 눌러야 해요). 풍선은 시작 후 20~40초 사이 랜덤한 시점부터 터질 수 있고(방장도 몰라요), 그 시점이 지난 뒤 처음 펌프를 누른 사람이 당첨으로 확정되고, 당첨 인원이 찰 때까지 새 풍선으로 반복해요. 한 풍선에는 최대 ${BL_GROUP}명이 참여하고 나머지는 구경해요. 6명 이상이면 조 추첨: 당첨 인원을 반으로 나눈 크기의 조로 나뉘고, 조가 돌아가며 ${BL_TURN}초 동안 한 사람당 최대 ${BL_MAXP}번 펌프해요(터지는 횟수는 비밀, 직전 조 횟수만 공개). 터뜨린 조 전원이 당첨이고, 남은 자리에 맞는 조끼리 이어서 해요.`,
     tap: `${TAP_CD}초 준비 후 ${TAP_DUR}초 동안 버튼을 최대한 많이 눌러요. 모두의 횟수가 실시간 막대로 보이고, 가장 적게 누른 순서대로 당첨돼요.`,
     mole: `${MOLE_CD}초 준비 후 ${MOLE_DUR}초 동안 구멍 6개에서 두더지가 나와요. 두더지를 누르면 +1점, 빈 구멍을 누르면 -${MOLE_MISS}점이에요. 가장 적게 잡은 순서대로 당첨돼요.`,
     minor: '매 라운드 그림 카드 2장 중 하나를 10초 안에 골라요. 설정에 따라 사람이 더 적은(또는 더 많은) 카드를 고른 사람만 살아남아 계속해요. 3명부터 할 수 있어요.',
