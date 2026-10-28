@@ -285,7 +285,7 @@ const CARS = [
   ['경주차','#b3121f'],['구급차','#f4f4f0'],['소방차','#ff3b1d'],['경찰차','#1d3d7a'],['캠핑카','#8fd3c8'],['카트','#ffa8a8'],
   ['오픈카','#00a6a6'],['포뮬러','#6a1b9a'],['랠리카','#ff7f00'],['SUV','#556b2f'],['전기차','#36d1a0'],['트랙터','#9c6b30']
 ];
-const raceDur = n => n <= 15 ? 20 : n < 20 ? 20 + 5 * (n - 15) : 45;   /* 레이스 길이(초): 15명 이하 20초, 16~19명은 1명당 +5초, 20명 이상 45초 */
+const raceDur = n => n <= 5 ? 10 : n <= 15 ? 20 : n < 20 ? 20 + 5 * (n - 15) : 45;   /* 레이스 길이(초): 5명 이하 10초, 6~15명 20초, 16~19명은 1명당 +5초, 20명 이상 45초 */
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -299,7 +299,7 @@ const short = n => n.length > 4 ? n.slice(0,4) + '…' : n;
 
 /* ============ 당첨 규칙 (방장 설정, 모든 게임 공통) ============ */
 /* k: 당첨 인원(null이면 참여 인원의 절반), role: 'pay' 당첨자가 쏜다 / 'free' 당첨자는 면제(나머지가 쏜다) */
-const cfg = { k:null, role:'pay', lmode:'pick', qn:1 };   /* qn: 퀴즈 문제 수 */   /* lmode: 사다리 이름 배치 pick(각자 고르기) / rand(랜덤) / host(방장이 직접) */
+const cfg = { k:null, role:'pay', lmode:'pick', qn:1, rmode:'last', rk:[] };   /* rmode: 레이스 당첨 순위 last(꼴찌부터 k명) / pick(순위 직접 고르기), rk: 직접 고른 순위들 */   /* qn: 퀴즈 문제 수 */   /* lmode: 사다리 이름 배치 pick(각자 고르기) / rand(랜덤) / host(방장이 직접) */
 try{
   const r = store.get('ds_role'); if(r === 'pay' || r === 'free') cfg.role = r;
   const m = store.get('ds_lmode'); if(m === 'pick' || m === 'rand' || m === 'host') cfg.lmode = m;
@@ -893,8 +893,14 @@ function startRace(){
   if(ps.length < MIN){ toast('최소 2명이 필요해요'); return; }
   const ids = ps.map(p => p.id), N = ids.length;
   S.rule = ruleFor('race', N);
+  let wr;
+  if(cfg.rmode === 'pick'){
+    wr = [...new Set(cfg.rk)].filter(r => r >= 1 && r <= N).sort((a, b) => a - b);
+    if(!wr.length || wr.length >= N){ toast(wr.length ? '당첨 순위는 전체 인원보다 적어야 해요' : '당첨 순위를 1개 이상 골라 주세요'); return; }
+    S.rule = { k: wr.length, role: S.rule.role };
+  }else wr = [...Array(S.rule.k).keys()].map(i => N - i).sort((a, b) => a - b);
   S.game = 'race'; S.result = null; S.phase = 'rpick'; S.secs = PICK_SECS;
-  S.race = { N, ids, slots: {}, k: S.rule.k };
+  S.race = { N, ids, slots: {}, k: wr.length, wr };
   S.rk++; clearTimeout(raceTimer);
   raceTimer = setTimeout(() => { if(S.phase === 'rpick') raceRun(); }, PICK_SECS * 1000 + 1200);   /* 시간 안에 못 고른 사람은 랜덤 배정 */
   push(); botRace();
@@ -954,7 +960,7 @@ function raceFinish(){
   const R = S.race, owner = {};
   Object.entries(R.slots).forEach(([id, c]) => owner[c] = id);
   const rank = R.order.map(c => ({ c, id: owner[c] }));
-  const winners = rank.slice(R.N - R.k).map(r => r.id);
+  const winners = rank.filter((r, i) => R.wr.includes(i + 1)).map(r => r.id);
   finishGame('race', winners, R.ids.slice(), { rank });
 }
 
@@ -964,10 +970,10 @@ function rpickHtml(){
   const R = S.race, N = R.N, owner = raceOwner();
   const amIn = R.ids.includes(myId);
   const left = Math.max(0, S.secs - Math.floor((Date.now() - rkStart) / 1000));
-  const roleTxt = S.rule.role === 'pay' ? '꼴찌 쪽 ' + R.k + '명이 쏘는 사람' : '꼴찌 쪽 ' + R.k + '명이 면제';
+  const roleTxt = `${R.wr.join('·')}위가 ` + (S.rule.role === 'pay' ? '쏘는 사람' : '면제');
   let h = `<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2 style="margin:0">🏎️ 자동차 레이스 · 당첨 ${R.k}명</h2><b id="tm" style="font-size:22px;color:var(--red)">${left}</b></div>
     <p class="sub" style="margin:4px 0 0">${amIn?`${PICK_SECS}초 안에 내 자동차를 골라요. 못 고르면 랜덤 배정! 순위는 결승선 통과 순서예요.`:'이번 판은 구경만 해요 👀'} (${Object.keys(R.slots).length}/${N}명 선택)</p>
-    <p class="sub" style="margin:2px 0 0">꼴찌부터 순위를 발표해요 · ${roleTxt}</p>
+    <p class="sub" style="margin:2px 0 0">당첨 순위: ${roleTxt} · 순위는 꼴찌부터 발표해요</p>
     <div class="cols">` +
     [...Array(N).keys()].map(c => {
       const who = owner[c], mine = who === myId;
@@ -983,7 +989,7 @@ function raceHtml(){      /* 레이스 중에는 글자가 바뀌지 않는 틀�
   return `<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2 style="margin:0">🏎️ 자동차 레이스</h2><b id="rst" class="sub"></b></div>
     <div class="sub" style="margin:2px 0">${mc != null ? `내 차: <i class="sw" style="background:${CARS[mc][1]}"></i><b>${CARS[mc][0]}</b>` : '구경 중 👀'}</div>
     <div id="rev" class="center" style="min-height:26px;font-weight:700;margin:2px 0"></div>
-    <canvas id="rcv" height="440"></canvas><div id="rtop" class="chips" style="margin-top:8px"></div>`;
+    <canvas id="rcv" height="440"></canvas><div id="rtop" class="chips" style="margin-top:8px"></div><div class="sub" style="margin-top:6px">빨간 표시 = 지금 당첨 순위(${R.wr.join('·')}위)에 있는 차</div>`;
 }
 let revSeen = -1;
 function revCount(){
@@ -998,12 +1004,12 @@ function rrevHtml(){
   const doing = n < N ? `${first > 1 ? first - 1 : 1}위를 가리는 중…` : '순위 발표 끝!';
   let rows = '';
   for(let r = 1; r <= N; r++){
-    const shown = r >= first && n > 0, win = r > N - R.k;
+    const shown = r >= first && n > 0, win = R.wr.includes(r);
     if(!shown){ rows += `<div class="vrow hid"><b>${r}</b><span>?</span>${win?'<span class="badge">당첨 자리</span>':''}</div>`; continue; }
     const c = rankOf[r], id = owner[c], last = r === first;
     rows += `<div class="vrow ${win?'w':''} ${last?'new':''} ${id===myId?'me':''}" ${last?'id="rv-last"':''}><b>${r}</b><i class="sw" style="background:${CARS[c][1]}"></i><span class="cn">${CARS[c][0]}</span>${win?'<span class="badge">당첨</span>':''}<span class="on">${esc(id ? nm(id) : '?')}</span></div>`;
   }
-  return `<h2 class="center" style="margin:0">🏁 순위 발표</h2><div class="center sub" style="margin:4px 0 8px">꼴찌부터 공개해요 · ${doing}</div><div class="vlist">${rows}</div>`;
+  return `<h2 class="center" style="margin:0">🏁 순위 발표</h2><div class="center sub" style="margin:4px 0 8px">꼴찌부터 공개해요 · 당첨 순위 ${R.wr.join('·')}위 · ${doing}</div><div class="vlist">${rows}</div>`;
 }
 
 /* ----- 자동차 레이스: 캔버스 ----- */
@@ -1104,13 +1110,15 @@ function drawRace(now){
   });
   const ev = evs[evs.length - 1];
   if(ev) evTxt = ev.type === 'sc' ? '🟡 세이프티카! 간격이 좁아져요' : ev.type === 'boost' ? '🚀 ' + CARS[ev.car][0] + ' 부스트!' : '💫 ' + CARS[ev.car][0] + ' 스핀!';
+  const wrCar = {}; rank.forEach((c, j) => { if(R.wr.includes(j + 1)) wrCar[c] = 1; });
   const dr = V.slice().sort((a, b) => P[a] - P[b]);
   const laneIdx = {}; V.forEach((i, j) => laneIdx[i] = j);
   dr.forEach(i => {
     const tx = 10 + (laneIdx[i] + .5) * laneW;
     rc.lane[i] = rc.lane[i] == null ? tx : rc.lane[i] + (tx - rc.lane[i]) * dk;
     const x = rc.lane[i], y = Y(P[i]), isMe = rc.owner[i] === myId;
-    if(isMe){ g.fillStyle = 'rgba(235,157,42,.35)'; rrect(g, x - cw / 2 - 4, y - ch / 2 - 4, cw + 8, ch + 8, 8); g.fill(); }
+    if(wrCar[i] && !isMe){ g.fillStyle = 'rgba(200,68,47,.4)'; rrect(g, x - cw / 2 - 3, y - ch / 2 - 3, cw + 6, ch + 6, 7); g.fill(); }
+    if(isMe){ g.fillStyle = wrCar[i] ? 'rgba(200,68,47,.55)' : 'rgba(235,157,42,.35)'; rrect(g, x - cw / 2 - 4, y - ch / 2 - 4, cw + 8, ch + 8, 8); g.fill(); }
     drawCar(g, x, y, cw, ch, CARS[i][1], i + 1, spinOf[i] ? Math.sin(tsC * 18) * .9 : 0, !!boostOf[i]);
     if(isMe || (V.length <= 10 && cw >= 22)){
       const o = rc.owner[i], t = isMe ? '나' : (o ? short(nm(o)) : '');
@@ -1562,7 +1570,7 @@ function setupHtml(g, online){
     ladder: '번호(이름 위치)를 정하면 사다리가 공개되고 한 명씩 내려가요.',
     speed: `${SP_LEAD}초 준비 후 스톱워치가 시작돼요. ${SP_SHOW}초 뒤 숫자가 사라지면 마음속으로 세다가 ${SP_TARGET}초라고 느껴질 때 "멈춰!"를 누르세요. ${SP_TARGET}초에 가장 가까운 순서대로 당첨돼요. (예: 4.48초보다 5.02초가 더 가까워요)`,
     quiz: `문제를 내면 ${PICK_SECS}초 안에 답이 빨리 낸 순서대로 쌓여요. 정답자를 고르면 빠른 순서대로 당첨돼요.`,
-    race: `각자 자동차를 고르고 ${PICK_SECS}초 뒤 레이스가 시작돼요. 사람이 많을수록 상위권 위주로 카메라가 따라가요. 결승선 통과 순서가 순위이고, 순위는 꼴찌부터 빠르게 발표해요. 꼴찌 쪽 당첨 인원(기본: 참여 인원의 절반)만큼이 당첨이에요. (레이스 길이: 15명 이하 20초 · 20명 이상 45초)`,
+    race: `각자 자동차를 고르고 ${PICK_SECS}초 뒤 레이스가 시작돼요. 결승선 통과 순서가 순위이고, 순위는 꼴찌부터 빠르게 발표해요. 당첨 순위는 꼴찌부터 정한 인원(기본: 참여 인원의 절반)이거나 직접 고른 순위예요. (레이스 길이: 5명 이하 10초 · 15명 이하 20초 · 20명 이상 45초)`,
     vote: '누가 투표했는지는 모두에게 보이지만, 무엇을 골랐는지는 알 수 없어요. 개표 전에는 방장도 득표 수를 볼 수 없어요.'
   };
   let extra = '';
@@ -1570,6 +1578,16 @@ function setupHtml(g, online){
     const m = cfg.lmode;
     const sb = (v, t, d) => `<button type="button" data-lm="${v}" class="${m===v?'on':''}">${t}<small>${d}</small></button>`;
     extra = `<div class="setup-sec"><div class="sub">이름 배치 방식</div><div class="seg">${sb('pick','각자 고르기',PICK_SECS+'초 안에')}${sb('rand','랜덤 배치','바로 시작')}${sb('host','방장이 정하기','▲▼로 직접')}</div></div>`;
+  }else if(g === 'race'){
+    const N = online <= 1 ? 2 : online, dk = ruleFor('race', N).k, cur = cfg.rk.filter(r => r <= N);
+    const mbtn = (v, t, d) => `<button type="button" data-rm="${v}" class="${cfg.rmode===v?'on':''}">${t}<small>${d}</small></button>`;
+    extra = `<div class="setup-sec"><div class="sub">당첨 순위 정하기</div><div class="seg">${mbtn('last','꼴찌부터','위 규칙의 당첨 인원')}${mbtn('pick','순위 직접 고르기','예: 2·7·9위')}</div>`;
+    if(cfg.rmode === 'pick'){
+      extra += `<div class="sub" style="margin-top:10px">당첨 순위를 누르세요 (참여 ${N}명 · 선택 ${cur.length}개${cur.length ? ': ' + cur.slice().sort((a, b) => a - b).join('·') + '위' : ''})</div>
+        <div class="cols">${[...Array(N).keys()].map(i => i + 1).map(r => `<button type="button" data-rk="${r}" class="${cur.includes(r)?'mine':''}">${r}위<small>${cur.includes(r)?'당첨':''}</small></button>`).join('')}</div>
+        <div class="row" style="flex-wrap:nowrap;gap:6px"><button class="btn sm" type="button" data-rkp="last" style="flex:1">꼴찌 ${dk}명</button><button class="btn sm" type="button" data-rkp="first" style="flex:1">1등부터 ${dk}명</button><button class="btn sm" type="button" data-rkp="rand" style="flex:1">랜덤 ${dk}개</button></div>`;
+    }
+    extra += `</div>`;
   }else if(g === 'vote'){
     const mb = (v, t, d) => `<button type="button" data-vm="${v}" class="${vDraft.mode===v?'on':''}">${t}<small>${d}</small></button>`;
     const os = vDraft.opts.map((o, i) => `<div class="row" style="flex-wrap:nowrap;margin-top:8px"><input type="text" data-vi="${i}" maxlength="20" placeholder="선택지 ${i+1}" aria-label="선택지 ${i+1}" value="${esc(o)}" style="flex:1;min-width:0">${vDraft.opts.length>VMIN?`<button class="btn sm" type="button" data-vdel="${i}" aria-label="선택지 ${i+1} 삭제">✕</button>`:''}</div>`).join('');
@@ -1860,7 +1878,7 @@ setInterval(() => {
       const first = revSeen < 0;
       revSeen = n;
       if(n > 0){
-        const r = S.race.N - n + 1, win = r > S.race.N - S.race.k;
+        const r = S.race.N - n + 1, win = S.race.wr.includes(r);
         if(r <= 3) { tone(300 + (4 - r) * 150, .35, 'triangle', .22); vib(r === 1 ? [120,60,120] : 60); }
         else if(win) tone(260, .12, 'square', .09); else tone(520 + (n % 6) * 40, .08, 'triangle', .1);
       }
@@ -2042,6 +2060,13 @@ $('#stage').addEventListener('click', e => {
     else if(b.dataset.vadd != null){ if(vDraft.opts.length < VMAX) vDraft.opts.push(''); }
     else if(vDraft.opts.length > VMIN) vDraft.opts.splice(+b.dataset.vdel, 1);
     try{ document.activeElement.blur(); }catch(e){}       /* 입력창 포커스를 풀어야 화면이 다시 그려짐 */
+    render(); return;
+  }
+  if(b.dataset.rm != null){ cfg.rmode = b.dataset.rm; render(); return; }
+  if(b.dataset.rk != null){ const r = +b.dataset.rk, i = cfg.rk.indexOf(r); if(i >= 0) cfg.rk.splice(i, 1); else cfg.rk.push(r); render(); return; }
+  if(b.dataset.rkp != null){
+    const N = Math.max(2, S.players.filter(p => p.on).length), k = ruleFor('race', N).k, all = [...Array(N).keys()].map(i => i + 1);
+    cfg.rk = b.dataset.rkp === 'last' ? all.slice(N - k) : b.dataset.rkp === 'first' ? all.slice(0, k) : shuffle(all).slice(0, k);
     render(); return;
   }
   if(b.dataset.lm != null){ cfg.lmode = b.dataset.lm; store.set('ds_lmode', cfg.lmode); render(); return; }
