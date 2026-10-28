@@ -70,6 +70,19 @@ input[type=text]{width:100%;padding:11px 12px;border:1px solid var(--line);borde
 #lscroll{overflow-x:auto;-webkit-overflow-scrolling:touch}
 canvas{display:block}
 .tally{font-size:13px;color:var(--fg2);margin-top:8px}
+.sw{display:inline-block;width:12px;height:12px;border-radius:4px;border:1px solid rgba(0,0,0,.35);vertical-align:-1px;margin-right:4px}
+.cols button .sw{display:block;width:22px;height:22px;margin:0 auto 4px}
+#rcv{display:block;width:100%;height:440px;border-radius:8px;background:#5b5d56}
+.vlist{display:flex;flex-direction:column;gap:3px;margin-top:6px}
+.vrow{display:flex;align-items:center;gap:8px;padding:5px 10px;min-height:30px;border:1px solid var(--line2);border-radius:8px;background:#fff;font-size:14px}
+.vrow b{min-width:24px}
+.vrow .cn{font-weight:600}
+.vrow .on{margin-left:auto;color:var(--fg2)}
+.vrow .badge{margin-left:0}
+.vrow.hid{border:2px dashed var(--line);background:var(--paper2);color:var(--fg3)}
+.vrow.w{background:#fbe0da;border-color:#e3a89d}
+.vrow.new{border-color:var(--amber-dk);box-shadow:0 0 0 3px rgba(235,157,42,.3)}
+.vrow.me{font-weight:700}
 .win-name{font-size:26px;font-weight:800;color:var(--red);text-align:center;margin:8px 0;line-height:1.3}
 #toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 20px);transform:translateX(-50%);background:#23251d;color:#fff;padding:9px 16px;border-radius:999px;font-size:14px;opacity:0;pointer-events:none;transition:opacity .2s;max-width:90vw;z-index:9}
 #toast.show{opacity:.95}
@@ -211,7 +224,7 @@ select{padding:8px;border:1px solid var(--line);border-radius:6px;background:#ff
   <!-- 입장 화면 -->
   <section id="entry" class="card">
     <h2>☕ 음료 내기</h2>
-    <p class="sub" style="margin:0 0 12px">가위바위보 · 사다리타기 · 퀴즈 · 5초 만들기 · 익명투표를 모두가 각자 폰으로 참여해요. (2~30명, 별도 가입 없음)</p>
+    <p class="sub" style="margin:0 0 12px">가위바위보 · 사다리타기 · 퀴즈 · 5초 만들기 · 익명투표 · 자동차 레이스를 모두가 각자 폰으로 참여해요. (2~30명, 별도 가입 없음)</p>
     <label class="sub">내 이름</label>
     <input type="text" id="name" maxlength="8" placeholder="이름(8자 이내)" autocomplete="off">
     <div style="height:12px"></div>
@@ -262,7 +275,17 @@ const SP_LIMIT = 10;          /* 5초 만들기: 시작 후 이 시간(초)까�
 const VMIN = 2, VMAX = 6;     /* 익명투표: 선택지 개수 */
 const VOTE_SECS = 60;         /* 익명투표: '시간 제한' 모드의 제한 시간(초) */
 const VOTE_WAIT = 2200;       /* 익명투표: 마감 후 늦게 도착하는 표를 기다리는 시간(ms) */
-const GAME_NAME = { rps:'가위바위보', ladder:'사다리타기', quiz:'퀴즈', speed:'5초 만들기', vote:'익명투표' };
+const GAME_NAME = { rps:'가위바위보', ladder:'사다리타기', quiz:'퀴즈', speed:'5초 만들기', vote:'익명투표', race:'자동차 레이스' };
+const RACE_CD = 3;            /* 자동차 레이스: 출발 카운트다운(초) */
+/* 자동차 30종 (성능 차이는 없고 색·이름·번호만 달라요) */
+const CARS = [
+  ['로드스터','#d94a3a'],['지프','#f08a24'],['택시','#f2c230'],['해치백','#7fb83a'],['쿠페','#2f8f5b'],['밴','#3cb7a8'],
+  ['세단','#4aa3e0'],['스포츠','#2d5fc4'],['리무진','#7e57c2'],['미니','#e66a9e'],['클래식','#8a8d85'],['슈퍼카','#2b2c28'],
+  ['트럭','#a0522d'],['버스','#e8c07a'],['왜건','#5f7a3a'],['컨버터블','#ff5d8f'],['픽업','#b9852b'],['레트로','#c9a0dc'],
+  ['경주차','#b3121f'],['구급차','#f4f4f0'],['소방차','#ff3b1d'],['경찰차','#1d3d7a'],['캠핑카','#8fd3c8'],['카트','#ffa8a8'],
+  ['오픈카','#00a6a6'],['포뮬러','#6a1b9a'],['랠리카','#ff7f00'],['SUV','#556b2f'],['전기차','#36d1a0'],['트랙터','#9c6b30']
+];
+const raceDur = n => n <= 15 ? 20 : n < 20 ? 20 + 5 * (n - 15) : 45;   /* 레이스 길이(초): 15명 이하 20초, 16~19명은 1명당 +5초, 20명 이상 45초 */
 
 const $ = s => document.querySelector(s);
 const esc = s => String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -305,7 +328,7 @@ let vol = (() => { const v = parseInt(store.get('ds_vol'), 10); return Number.is
 const VOL_MAX = 5, volGain = () => vol / 100 * VOL_MAX;
 let setupGame = null;   /* 방장이 지금 설정 중인 게임(내 화면에서만) */
 /* 방장 전용(비공개) */
-let picks = {}, rpsTimer = null, spRes = {}, spTimer = null, lpTimer = null, qTimer = null, qAns = [], qMark = {};
+let raceTimer = null, picks = {}, rpsTimer = null, spRes = {}, spTimer = null, lpTimer = null, qTimer = null, qAns = [], qMark = {};
 /* 익명투표(방장 전용): 투표한 사람 명단(vVoted)과 선택지별 합계(vTally)를 따로 보관하고 서로 연결하지 않음 */
 let vTimer = null, vVoted = new Set(), vTally = [], vDraft = { q:'', opts:['', ''], mode:'host' };
 
@@ -597,7 +620,7 @@ function leaveRoom(silent){
     try{ cli.end(true); }catch(e){}
   }
   setupGame = null;
-  clearInterval(hbTimer); clearTimeout(rpsTimer); clearTimeout(spTimer); clearTimeout(lpTimer); clearTimeout(qTimer); clearTimeout(vTimer); clearInterval(cntTimer);
+  clearInterval(hbTimer); clearTimeout(rpsTimer); clearTimeout(spTimer); clearTimeout(lpTimer); clearTimeout(qTimer); clearTimeout(vTimer); clearTimeout(raceTimer); clearInterval(cntTimer);
   cli = null; room = null; isHost = false; S = null; published = false; connected = false;
   $('#room').hidden = true; $('#entry').hidden = false; $('#banner').hidden = true;
   $('#lwrap').hidden = true; animIdx = -2;
@@ -621,7 +644,7 @@ function uniqueName(n, selfId){
 }
 /* 정원이 찼을 때: 이미 나간(오프라인) 사람 중 진행 중인 게임에 끼어 있지 않은 사람의 자리를 비워 줌 */
 function evictOffline(){
-  const busy = new Set([].concat(S.alive || [], S.rpool || [], (S.lad && S.lad.ids) || [], S.qids || [], (S.sp && S.sp.ids) || [], (S.vote && S.vote.ids) || []));
+  const busy = new Set([].concat(S.alive || [], S.rpool || [], (S.lad && S.lad.ids) || [], S.qids || [], (S.sp && S.sp.ids) || [], (S.vote && S.vote.ids) || [], (S.race && S.race.ids) || []));
   const i = S.players.findIndex(p => !p.on && !p.bot && p.id !== S.host && !busy.has(p.id));
   if(i < 0) return false;
   S.players.splice(i, 1);
@@ -643,22 +666,23 @@ function handleAction(m){
     }
     case 'off': {
       const p = pl(id);
-      if(p){ p.on = false; push(); if(S.phase==='rps') checkRpsAll(); if(S.phase==='lpick') checkLadderAll(); if(S.phase==='speed') checkSpeedAll(); if(S.phase==='vote') checkVoteAll(); }
+      if(p){ p.on = false; push(); if(S.phase==='rps') checkRpsAll(); if(S.phase==='lpick') checkLadderAll(); if(S.phase==='speed') checkSpeedAll(); if(S.phase==='vote') checkVoteAll(); if(S.phase==='rpick') checkRaceAll(); }
       break;
     }
     case 'pick': rpsPick(id, m.c); break;
     case 'col': ladderCol(id, m.c); break;
     case 'ans': quizAnswer(id, m.text); break;
     case 'sp': speedPress(id, m.rt); break;
+    case 'car': raceCar(id, m.c); break;
     case 'vreg': voteReg(id); break;       /* '투표했다'는 사실만 등록 (선택 내용은 별도 경로로 옴) */
   }
 }
 
 function resetToLobby(){
-  clearTimeout(rpsTimer); clearTimeout(spTimer); clearTimeout(lpTimer); clearTimeout(qTimer); clearTimeout(vTimer);
+  clearTimeout(rpsTimer); clearTimeout(spTimer); clearTimeout(lpTimer); clearTimeout(qTimer); clearTimeout(vTimer); clearTimeout(raceTimer);
   picks = {}; spRes = {}; qAns = []; qMark = {}; vVoted = new Set(); vTally = [];
   S.phase = 'lobby'; S.game = null; S.alive = null; S.picked = []; S.reveal = null; S.lad = null; S.result = null; S.note = '';
-  S.rule = null; S.conf = null; S.need = null; S.rpool = null; S.q = null; S.qids = null; S.sp = null; S.qs = null; S.vote = null;
+  S.rule = null; S.conf = null; S.need = null; S.rpool = null; S.q = null; S.qids = null; S.sp = null; S.qs = null; S.vote = null; S.race = null;
 }
 function toLobby(){ dropBots(); resetToLobby(); push(); }
 
@@ -770,6 +794,375 @@ function resolveRps(){
     }, 5200);
   }, 3300);
 }
+
+/* ===== 레이스 시뮬레이션 (모든 기기에서 같은 seed → 같은 결과. Math.random/초월함수 사용 금지) ===== */
+const RACE_L = 1000, RACE_DT = 0.05, RACE_V = 50;
+function mkRng(seed){
+  let a = seed >>> 0;
+  return function(){
+    a = (a + 0x6D2B79F5) >>> 0;
+    let t = a;
+    t = Math.imul(t ^ (t >>> 15), t | 1);
+    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+function raceSim(seed, N){
+  const rnd = mkRng(seed), L = RACE_L, dt = RACE_DT, est = L / RACE_V;
+  const pos = new Float64Array(N), m = new Float64Array(N), bst = new Float64Array(N), spn = new Float64Array(N);
+  const fin = new Float64Array(N).fill(-1);
+  /* 이벤트 일정(시작 시각만 미리 뽑고, 대상 차량은 그 시점의 순위로 정함) */
+  const evs = [];
+  const K = 3 + Math.floor(N / 5);
+  let scDone = false;
+  for(let k = 0; k < K; k++){
+    const u = rnd(), r = rnd();
+    let type = r < 0.5 ? 'boost' : 'spin';
+    let t = est * (0.12 + 0.85 * Math.sqrt(u));
+    if(!scDone && r > 0.86){ type = 'sc'; scDone = true; t = est * (0.4 + 0.3 * u); }
+    evs.push({ t0: t, type, car: -1, t1: 0, done: false });
+  }
+  evs.sort((a, b) => a.t0 - b.t0);
+  const traj = [];
+  const snap = () => { for(let i = 0; i < N; i++) traj.push(pos[i]); };
+  snap();
+  let t = 0, step = 0, left = N, scUntil = -1;
+  const idx = new Array(N);
+  while(left > 0 && step < 4000){
+    step++; t = step * dt;
+    /* 현재 순위(앞선 순) */
+    for(let i = 0; i < N; i++) idx[i] = i;
+    idx.sort((a, b) => (fin[a] >= 0 ? 1e9 - fin[a] : pos[a]) - (fin[b] >= 0 ? 1e9 - fin[b] : pos[b]) || a - b);
+    idx.reverse();
+    const run = idx.filter(i => fin[i] < 0);
+    /* 이벤트 발동 */
+    for(const e of evs){
+      if(e.done || t < e.t0) continue;
+      e.done = true;
+      if(e.type === 'sc'){ e.t1 = t + 1.6; scUntil = e.t1; continue; }
+      if(!run.length) continue;
+      const nn = run.length;
+      let pick;
+      if(e.type === 'boost') pick = run[Math.floor(nn * 0.4 + rnd() * nn * 0.6)];      /* 뒤쪽 60% */
+      else pick = run[Math.floor(rnd() * Math.max(1, Math.ceil(nn * 0.4)))];             /* 앞쪽 40% */
+      if(pick === undefined) pick = run[0];
+      e.car = pick;
+      if(e.type === 'boost'){ bst[pick] = 1.3; e.t1 = t + 1.3; } else { spn[pick] = 1.0; e.t1 = t + 1.0; }
+    }
+    const lead = run.length ? pos[run[0]] : L;
+    const prog = lead / L;
+    const sigma = prog > 0.78 ? 0.26 : 0.18;
+    const sc = t < scUntil;
+    let mean = 0; for(let q = 0; q < run.length; q++) mean += pos[run[q]]; mean = run.length ? mean / run.length : 0;
+    const second = run.length > 1 ? pos[run[1]] : -1e9;
+    for(let q = 0; q < run.length; q++){
+      const i = run[q];
+      m[i] += -1.0 * m[i] * dt + sigma * (rnd() * 2 - 1) * 1.732 * 0.2236;   /* sqrt(dt)=0.2236 */
+      let v = RACE_V * (1 + m[i]);
+      if(q > 0){                                  /* 슬립스트림: 바로 앞차가 가까우면 가속 */
+        const gap = pos[run[q - 1]] - pos[i];
+        if(gap < 18) v *= 1.05;
+      }
+      const behind = lead - pos[i];               /* 러버밴드 */
+      if(behind > 80) v *= 1 + Math.min(0.08, (behind - 80) * 0.0006);
+      if(q === 0 && pos[i] - second > 40) v *= 0.96;      /* 선두 독주 방지 */
+      if(bst[i] > 0){ v *= 1.3; bst[i] -= dt; }
+      if(spn[i] > 0){ v *= 0.35; spn[i] -= dt; }
+      if(sc) v *= 0.6;
+      if(v < 5) v = 5;
+      let np = pos[i] + v * dt;
+      if(sc) np += (mean - np) * 0.03;
+      if(np >= L){
+        fin[i] = t - (np - L) / v;
+        pos[i] = L; left--;
+      }else pos[i] = np;
+    }
+    snap();
+  }
+  for(let i = 0; i < N; i++) if(fin[i] < 0){ fin[i] = t + (L - pos[i]) / RACE_V; }
+  const order = []; for(let i = 0; i < N; i++) order.push(i);
+  order.sort((a, b) => fin[a] - fin[b] || a - b);
+  return { N, dt, steps: step + 1, pos: traj, fin: Array.from(fin), order, tFirst: fin[order[0]], tEnd: fin[order[N - 1]], events: evs.filter(e => e.done).map(e => ({ t0: e.t0, t1: e.t1, type: e.type, car: e.car })) };
+}
+
+/* ----- 자동차 레이스 ----- */
+/* 결과(시드)만 방장이 정해서 알려 주고, 각 기기가 같은 시뮬레이션을 돌려 같은 화면을 보여줘요. 당첨은 꼴찌부터 k명. */
+function startRace(){
+  ensureBot();
+  const ps = S.players.filter(p => p.on);
+  if(ps.length < MIN){ toast('최소 2명이 필요해요'); return; }
+  const ids = ps.map(p => p.id), N = ids.length;
+  S.rule = ruleFor('race', N);
+  S.game = 'race'; S.result = null; S.phase = 'rpick'; S.secs = PICK_SECS;
+  S.race = { N, ids, slots: {}, k: S.rule.k };
+  S.rk++; clearTimeout(raceTimer);
+  raceTimer = setTimeout(() => { if(S.phase === 'rpick') raceRun(); }, PICK_SECS * 1000 + 1200);   /* 시간 안에 못 고른 사람은 랜덤 배정 */
+  push(); botRace();
+}
+function botRace(){
+  if(!pl(BOT)) return;
+  botWait(() => {
+    if(S.phase !== 'rpick') return;
+    const used = Object.values(S.race.slots), free = [...Array(S.race.N).keys()].filter(c => !used.includes(c));
+    if(free.length) raceCar(BOT, free[Math.floor(Math.random() * free.length)]);
+  }, 1000 + Math.random() * 2500);
+}
+function raceCar(id, c){
+  if(S.phase !== 'rpick' || !S.race.ids.includes(id)) return;
+  const R = S.race;
+  if(!Number.isInteger(c) || c < 0 || c >= R.N) return;
+  if(Object.entries(R.slots).some(([i, v]) => v === c && i !== id)) return;
+  R.slots[id] = c; push(); checkRaceAll();
+}
+function checkRaceAll(){
+  if(S.phase !== 'rpick') return;
+  const R = S.race, need = R.ids.filter(id => pl(id) && pl(id).on);
+  if(need.every(id => R.slots[id] != null)) setTimeout(() => { if(S.phase === 'rpick') raceRun(); }, 700);
+}
+function raceRun(){
+  if(S.phase !== 'rpick') return;
+  clearTimeout(raceTimer);
+  const R = S.race, N = R.N;
+  const used = new Set(Object.values(R.slots));
+  const free = shuffle([...Array(N).keys()].filter(c => !used.has(c)));
+  R.ids.forEach(id => { if(R.slots[id] == null) R.slots[id] = free.pop(); });
+  R.seed = (Math.random() * 4294967296) >>> 0;
+  const sim = raceSim(R.seed, N);
+  R.order = sim.order;                              /* 결승선 통과 순서(차 번호) */
+  R.f = raceDur(N) / sim.tFirst;                    /* 재생 배속: 1등이 정해진 시간에 들어오도록 */
+  const total = RACE_CD + sim.tEnd * R.f;
+  S.rk++; S.phase = 'race'; push();
+  raceTimer = setTimeout(raceReveal, (total + 2) * 1000);
+}
+/* 순위 발표 일정: 꼴찌부터 빠르게, 3·2·1위만 조금 뜸 들이기 */
+function revTimes(N){
+  const t = []; let x = 0.6;
+  for(let r = N; r >= 1; r--){
+    t.push(x);
+    x += r > 3 ? 0.3 : r === 3 ? 0.8 : r === 2 ? 1.0 : 0;
+  }
+  return { t, end: t[t.length - 1] + 1.8 };
+}
+function raceReveal(){
+  if(S.phase !== 'race') return;
+  const R = S.race, tm = revTimes(R.N);
+  S.rk++; S.phase = 'rrev'; push();
+  raceTimer = setTimeout(raceFinish, tm.end * 1000);
+}
+function raceFinish(){
+  if(S.phase !== 'rrev') return;
+  const R = S.race, owner = {};
+  Object.entries(R.slots).forEach(([id, c]) => owner[c] = id);
+  const rank = R.order.map(c => ({ c, id: owner[c] }));
+  const winners = rank.slice(R.N - R.k).map(r => r.id);
+  finishGame('race', winners, R.ids.slice(), { rank });
+}
+
+/* ----- 자동차 레이스: 화면 ----- */
+const raceOwner = () => { const o = {}; Object.entries(S.race.slots).forEach(([id, c]) => o[c] = id); return o; };
+function rpickHtml(){
+  const R = S.race, N = R.N, owner = raceOwner();
+  const amIn = R.ids.includes(myId);
+  const left = Math.max(0, S.secs - Math.floor((Date.now() - rkStart) / 1000));
+  const roleTxt = S.rule.role === 'pay' ? '꼴찌 쪽 ' + R.k + '명이 쏘는 사람' : '꼴찌 쪽 ' + R.k + '명이 면제';
+  let h = `<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2 style="margin:0">🏎️ 자동차 레이스 · 당첨 ${R.k}명</h2><b id="tm" style="font-size:22px;color:var(--red)">${left}</b></div>
+    <p class="sub" style="margin:4px 0 0">${amIn?`${PICK_SECS}초 안에 내 자동차를 골라요. 못 고르면 랜덤 배정! 순위는 결승선 통과 순서예요.`:'이번 판은 구경만 해요 👀'} (${Object.keys(R.slots).length}/${N}명 선택)</p>
+    <p class="sub" style="margin:2px 0 0">꼴찌부터 순위를 발표해요 · ${roleTxt}</p>
+    <div class="cols">` +
+    [...Array(N).keys()].map(c => {
+      const who = owner[c], mine = who === myId;
+      const cls = mine ? 'mine' : who ? 'taken' : '';
+      const dis = (!amIn || (who && !mine)) ? 'disabled' : '';
+      return `<button type="button" data-car="${c}" class="${cls}"><i class="sw" style="background:${CARS[c][1]}"></i>${CARS[c][0]}<small>${who ? esc(short(nm(who))) : ''}</small></button>`;
+    }).join('') + '</div>';
+  if(isHost) h += `<button class="btn full" type="button" data-a="raceGo">남은 사람 랜덤 배정하고 바로 시작</button>`;
+  return h;
+}
+function raceHtml(){      /* 레이스 중에는 글자가 바뀌지 않는 틀만 만들고, 안쪽은 직접 갱신 */
+  const R = S.race, mc = R.slots[myId];
+  return `<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2 style="margin:0">🏎️ 자동차 레이스</h2><b id="rst" class="sub"></b></div>
+    <div class="sub" style="margin:2px 0">${mc != null ? `내 차: <i class="sw" style="background:${CARS[mc][1]}"></i><b>${CARS[mc][0]}</b>` : '구경 중 👀'}</div>
+    <div id="rev" class="center" style="min-height:26px;font-weight:700;margin:2px 0"></div>
+    <canvas id="rcv" height="440"></canvas><div id="rtop" class="chips" style="margin-top:8px"></div>`;
+}
+let revSeen = -1;
+function revCount(){
+  const el = (Date.now() - rkStart) / 1000, t = revTimes(S.race.N).t;
+  let n = 0; while(n < t.length && t[n] <= el) n++;
+  return n;
+}
+function rrevHtml(){
+  const R = S.race, N = R.N, owner = raceOwner(), n = revCount();
+  const rankOf = {}; R.order.forEach((c, i) => rankOf[i + 1] = c);
+  const first = N - n + 1;                       /* 공개된 가장 높은 순위 */
+  const doing = n < N ? `${first > 1 ? first - 1 : 1}위를 가리는 중…` : '순위 발표 끝!';
+  let rows = '';
+  for(let r = 1; r <= N; r++){
+    const shown = r >= first && n > 0, win = r > N - R.k;
+    if(!shown){ rows += `<div class="vrow hid"><b>${r}</b><span>?</span>${win?'<span class="badge">당첨 자리</span>':''}</div>`; continue; }
+    const c = rankOf[r], id = owner[c], last = r === first;
+    rows += `<div class="vrow ${win?'w':''} ${last?'new':''} ${id===myId?'me':''}" ${last?'id="rv-last"':''}><b>${r}</b><i class="sw" style="background:${CARS[c][1]}"></i><span class="cn">${CARS[c][0]}</span>${win?'<span class="badge">당첨</span>':''}<span class="on">${esc(id ? nm(id) : '?')}</span></div>`;
+  }
+  return `<h2 class="center" style="margin:0">🏁 순위 발표</h2><div class="center sub" style="margin:4px 0 8px">꼴찌부터 공개해요 · ${doing}</div><div class="vlist">${rows}</div>`;
+}
+
+/* ----- 자동차 레이스: 캔버스 ----- */
+let rcState = null, rcRaf = false;
+function rcGet(){
+  const R = S.race, key = R.seed + ':' + R.N;
+  if(!rcState || rcState.key !== key) rcState = { key, sim: raceSim(R.seed, R.N), lo: 0, hi: 200, init: false, lane: {}, evSeen: {}, last: 0, topKey: '', evTxt: null, stTxt: null, owner: raceOwner() };
+  return rcState;
+}
+function carPos(sim, i, ts){
+  const N = sim.N, x = Math.max(0, ts) / sim.dt, maxA = sim.steps - 1, a = Math.floor(x);
+  if(a >= maxA) return sim.pos[maxA * N + i];
+  const fr = x - a;
+  return sim.pos[a * N + i] * (1 - fr) + sim.pos[(a + 1) * N + i] * fr;
+}
+function rcFocusM(N, lead){
+  const f = lead / RACE_L;
+  if(N <= 3) return N;
+  if(N <= 6) return f < .6 ? N : 3;
+  if(N <= 12) return f < .3 ? N : f < .65 ? 6 : 3;
+  return f < .25 ? N : f < .5 ? 12 : f < .75 ? 6 : 3;
+}
+function rrect(g, x, y, w, h, r){ g.beginPath(); if(g.roundRect) g.roundRect(x, y, w, h, r); else g.rect(x, y, w, h); }
+function drawCar(g, x, y, cw, ch, color, num, rot, flame){
+  g.save(); g.translate(x, y); if(rot) g.rotate(rot);
+  if(flame){
+    g.fillStyle = '#ff9d1c'; g.beginPath(); g.moveTo(-cw * .3, ch / 2); g.lineTo(0, ch / 2 + ch * (.45 + Math.random() * .25)); g.lineTo(cw * .3, ch / 2); g.fill();
+    g.fillStyle = '#fff3a0'; g.beginPath(); g.moveTo(-cw * .14, ch / 2); g.lineTo(0, ch / 2 + ch * .3); g.lineTo(cw * .14, ch / 2); g.fill();
+  }
+  rrect(g, -cw / 2, -ch / 2, cw, ch, Math.min(8, cw / 3)); g.fillStyle = color; g.fill();
+  g.lineWidth = 1; g.strokeStyle = 'rgba(0,0,0,.4)'; g.stroke();
+  g.fillStyle = 'rgba(255,255,255,.55)'; rrect(g, -cw * .36, -ch * .3, cw * .72, ch * .22, 2); g.fill();
+  if(cw >= 14){
+    const hx = color.replace('#', ''), v = parseInt(hx.length === 3 ? hx.replace(/./g, m => m + m) : hx, 16);
+    const lum = ((v >> 16) & 255) * .3 + ((v >> 8) & 255) * .59 + (v & 255) * .11;
+    g.fillStyle = lum > 150 ? '#222' : '#fff'; g.font = '800 ' + Math.max(8, Math.min(14, cw * .48)) + 'px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(String(num), 0, ch * .16);
+  }
+  g.restore();
+}
+function drawRace(now){
+  const R = S.race, cvs = $('#rcv'); if(!cvs || !R || R.seed == null) return;
+  const rc = rcGet(), sim = rc.sim, N = R.N, L = RACE_L;
+  const dtR = Math.min(.1, (now - rc.last) / 1000 || .016); rc.last = now;
+  const el = (Date.now() - rkStart) / 1000, tsC = Math.max(0, (el - RACE_CD) / R.f);
+  const W = cvs.clientWidth || 340, H = 440, dpr = window.devicePixelRatio || 1;
+  if(cvs.width !== Math.round(W * dpr) || cvs.height !== Math.round(H * dpr)){ cvs.width = Math.round(W * dpr); cvs.height = Math.round(H * dpr); cvs.style.height = H + 'px'; }
+  const g = cvs.getContext('2d'); g.setTransform(dpr, 0, 0, dpr, 0, 0); g.clearRect(0, 0, W, H);
+
+  /* 차 위치와 현재 순위 */
+  const P = [], key = [], idx = [];
+  let lead = 0;
+  for(let i = 0; i < N; i++){
+    const raw = carPos(sim, i, tsC), fin = sim.fin[i], done = tsC > fin;
+    P[i] = done ? L + Math.min(60, (tsC - fin) * 40) : raw; key[i] = done ? 1e6 - fin : raw; idx.push(i);
+    lead = Math.max(lead, Math.min(L, raw));
+  }
+  const rank = idx.slice().sort((a, b) => key[b] - key[a] || a - b);
+  const M = rcFocusM(N, lead), focus = rank.slice(0, M);
+
+  /* 카메라: 집중 대상 차들이 화면에 꽉 차도록 부드럽게 따라가요 */
+  let mn = 1e9, mx = -1e9; focus.forEach(i => { mn = Math.min(mn, P[i]); mx = Math.max(mx, P[i]); });
+  const pad = Math.max(30, (mx - mn) * .12), minSpan = M <= 3 ? 100 : M <= 6 ? 150 : 220;
+  let tlo = mn - pad, thi = mx + pad;
+  if(thi - tlo < minSpan){ const c = (thi + tlo) / 2; tlo = c - minSpan / 2; thi = c + minSpan / 2; }
+  if(!rc.init){ rc.lo = tlo; rc.hi = thi; rc.init = true; }
+  else{ const k = 1 - Math.exp(-dtR * 3.5); rc.lo += (tlo - rc.lo) * k; rc.hi += (thi - rc.hi) * k; }
+  const lo = rc.lo, hi = rc.hi, yT = 30, yB = H - 36, Y = p => yB - (p - lo) / (hi - lo) * (yB - yT);
+
+  /* 도로 */
+  g.fillStyle = '#5b5d56'; g.fillRect(4, 0, W - 8, H);
+  g.fillStyle = '#fff'; g.fillRect(4, 0, 3, H); g.fillRect(W - 7, 0, 3, H);
+  g.strokeStyle = 'rgba(255,255,255,.16)'; g.lineWidth = 1;
+  for(let p = Math.ceil(lo / 50) * 50; p <= hi; p += 50){ const y = Y(p); g.beginPath(); g.moveTo(8, y); g.lineTo(W - 8, y); g.stroke(); }
+  const flag = (p, label) => {
+    if(p < lo - 20 || p > hi + 20) return;
+    const y = Y(p), cs = 8;
+    for(let x = 8, j = 0; x < W - 8; x += cs, j++){ g.fillStyle = j % 2 ? '#fff' : '#222'; g.fillRect(x, y - cs, cs, cs); g.fillStyle = j % 2 ? '#222' : '#fff'; g.fillRect(x, y, cs, cs); }
+    g.fillStyle = '#fff'; g.font = '700 11px sans-serif'; g.textAlign = 'left'; g.textBaseline = 'alphabetic'; g.fillText(label, 10, y - cs - 3);
+  };
+  flag(0, '출발'); flag(L, '결승선');
+
+  /* 화면 안의 차 */
+  const mg = (hi - lo) * .08;
+  const V = [], below = [];
+  for(let i = 0; i < N; i++){ if(P[i] >= lo - mg && P[i] <= hi + mg) V.push(i); else if(P[i] < lo - mg) below.push(i); }
+  const laneW = (W - 20) / Math.max(1, V.length);
+  const cw = Math.max(7, Math.min(30, laneW - 4)), ch = Math.min(56, cw * 1.8);
+  const dk = 1 - Math.exp(-dtR * 6);
+  const evs = sim.events.filter(e => tsC >= e.t0 && tsC <= e.t1);
+  const spinOf = {}, boostOf = {}; let sc = false, evTxt = '';
+  evs.forEach(e => { if(e.type === 'spin') spinOf[e.car] = 1; else if(e.type === 'boost') boostOf[e.car] = 1; else sc = true; });
+  sim.events.forEach((e, k) => {
+    if(tsC >= e.t0 && !rc.evSeen[k]){
+      rc.evSeen[k] = 1;
+      if(tsC - e.t0 < 1.5){ if(e.type === 'boost') tone(700, .3, 'sawtooth', .12, 0, 1500); else if(e.type === 'spin') tone(420, .35, 'square', .1, 0, 120); else beep(520, .25, 'triangle', .15); }
+    }
+  });
+  const ev = evs[evs.length - 1];
+  if(ev) evTxt = ev.type === 'sc' ? '🟡 세이프티카! 간격이 좁아져요' : ev.type === 'boost' ? '🚀 ' + CARS[ev.car][0] + ' 부스트!' : '💫 ' + CARS[ev.car][0] + ' 스핀!';
+  const dr = V.slice().sort((a, b) => P[a] - P[b]);
+  const laneIdx = {}; V.forEach((i, j) => laneIdx[i] = j);
+  dr.forEach(i => {
+    const tx = 10 + (laneIdx[i] + .5) * laneW;
+    rc.lane[i] = rc.lane[i] == null ? tx : rc.lane[i] + (tx - rc.lane[i]) * dk;
+    const x = rc.lane[i], y = Y(P[i]), isMe = rc.owner[i] === myId;
+    if(isMe){ g.fillStyle = 'rgba(235,157,42,.35)'; rrect(g, x - cw / 2 - 4, y - ch / 2 - 4, cw + 8, ch + 8, 8); g.fill(); }
+    drawCar(g, x, y, cw, ch, CARS[i][1], i + 1, spinOf[i] ? Math.sin(tsC * 18) * .9 : 0, !!boostOf[i]);
+    if(isMe || (V.length <= 10 && cw >= 22)){
+      const o = rc.owner[i], t = isMe ? '나' : (o ? short(nm(o)) : '');
+      g.font = (isMe ? '800 ' : '600 ') + '11px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'alphabetic';
+      g.lineWidth = 3; g.strokeStyle = 'rgba(0,0,0,.65)'; g.strokeText(t, x, y - ch / 2 - 5); g.fillStyle = isMe ? '#ffd27a' : '#fff'; g.fillText(t, x, y - ch / 2 - 5);
+    }
+  });
+  if(sc){ g.fillStyle = 'rgba(242,194,48,.18)'; g.fillRect(4, 0, W - 8, H); }
+
+  /* 뒤처진 차 레이더 */
+  if(below.length){
+    g.fillStyle = 'rgba(0,0,0,.55)'; g.fillRect(4, H - 26, W - 8, 26);
+    g.fillStyle = '#fff'; g.font = '700 11px sans-serif'; g.textAlign = 'left'; g.textBaseline = 'middle'; g.fillText('▼ 뒤 ' + below.length + '대', 10, H - 13);
+    below.sort((a, b) => P[b] - P[a]).slice(0, 18).forEach((i, j) => {
+      g.fillStyle = CARS[i][1]; g.beginPath(); g.arc(W - 14 - j * 11, H - 13, rc.owner[i] === myId ? 6 : 4.5, 0, 7); g.fill();
+      g.lineWidth = 1; g.strokeStyle = rc.owner[i] === myId ? '#ffd27a' : 'rgba(255,255,255,.6)'; g.stroke();
+    });
+  }
+
+  /* 출발 카운트다운 */
+  if(el < RACE_CD + .8){
+    const n = Math.ceil(RACE_CD - el);
+    g.fillStyle = 'rgba(0,0,0,.45)'; g.beginPath(); g.arc(W / 2, H / 2, 54, 0, 7); g.fill();
+    g.fillStyle = '#fff'; g.font = '800 56px sans-serif'; g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText(el < RACE_CD ? String(n) : 'GO!', W / 2, H / 2 + 2);
+    if(rc.cdN !== (el < RACE_CD ? n : 0)){ rc.cdN = el < RACE_CD ? n : 0; if(rc.cdN) beep(520 + (3 - rc.cdN) * 140, .15); else { beep(1200, .3, 'square', .22); vib(80); } }
+  }
+
+  /* 글자 정보(바뀔 때만 DOM 갱신) */
+  const st = lead >= L ? '결승선 통과!' : M >= N ? '전체 보기' : '상위 ' + M + '대 집중 중계';
+  if(rc.stTxt !== st){ rc.stTxt = st; const e = $('#rst'); if(e) e.textContent = st; }
+  if(rc.evTxt !== evTxt){ rc.evTxt = evTxt; const e = $('#rev'); if(e) e.textContent = evTxt; }
+  const top = rank.slice(0, 5).map((i, j) => ({ j: j + 1, i }));
+  const mc = R.slots[myId], myRank = mc != null ? rank.indexOf(mc) + 1 : 0;
+  const tk = top.map(t => t.i).join(',') + '|' + myRank + '|' + (tsC > 0);
+  if(rc.topKey !== tk){
+    rc.topKey = tk;
+    const e = $('#rtop');
+    if(e && tsC > 0){
+      let h = top.map(t => `<span class="chip ${rc.owner[t.i] === myId ? 'me' : ''}"><b>${t.j}</b><i class="sw" style="background:${CARS[t.i][1]}"></i>${CARS[t.i][0]}</span>`).join('');
+      if(myRank > 5) h += `<span class="chip me">나 ${myRank}위</span>`;
+      e.innerHTML = h;
+    }
+  }
+}
+function rcLoop(now){
+  rcRaf = false;
+  if(!S || S.phase !== 'race' || !S.race) return;
+  try{ drawRace(now); }catch(e){ console.error(e); }
+  rcRaf = true; requestAnimationFrame(rcLoop);
+}
+function rcKick(){ if(!rcRaf){ rcRaf = true; requestAnimationFrame(rcLoop); } }
 
 /* ----- 사다리타기 ----- */
 function startLadder(){
@@ -1066,6 +1459,9 @@ function render(){
     if(S.phase === 'quiz' || S.phase === 'vote') beep(660, .2, 'triangle', .2);
     if(S.phase === 'speed') riser(SP_LEAD, .06);
     if(S.phase === 'ladder'){ riser(2.4, .05); drumRoll(2400, .22); }        /* 사다리 공개 */
+    if(S.phase === 'rpick') beep(660, .2, 'triangle', .2);
+    if(S.phase === 'race'){ riser(RACE_CD, .06); rcState = null; }
+    if(S.phase === 'rrev'){ revSeen = -1; drumRoll(900, .2); }
     if(S.phase === 'result'){ resultSound(S.result); vib([200,80,200]); }
     if(S.phase !== 'ladder'){ ladSeen = {}; lastLadIdx = -2; }
     prevPhase = S.phase;
@@ -1082,6 +1478,9 @@ function render(){
     case 'ladder': h = ladderHtml(); break;
     case 'quiz': h = quizHtml(); break;
     case 'speed': h = speedHtml(); break;
+    case 'rpick': h = rpickHtml(); break;
+    case 'race': h = raceHtml(); break;
+    case 'rrev': h = rrevHtml(); break;
     case 'vote': h = voteHtml(); break;
     case 'result': h = resultHtml(); break;
   }
@@ -1095,13 +1494,15 @@ function render(){
   lastPhaseR = S.phase;
   $('#room').dataset.phase = S.phase;
 
+  if(S.phase === 'race') rcKick();
+
   /* 사다리 캔버스 */
   const showLad = (S.phase === 'ladder' || (S.phase === 'result' && S.lad && S.lad.rungs));
   $('#lwrap').hidden = !showLad;
   if(showLad) ladderUpdate();
 
   /* 참가자 목록 */
-  const picked = (S.phase === 'rps' || S.phase === 'speed' || S.phase === 'vote') ?(S.picked || []) : (S.phase === 'quiz' && S.q ? S.q.subs : []);
+  const picked = (S.phase === 'rps' || S.phase === 'speed' || S.phase === 'vote') ?(S.picked || []) : (S.phase === 'quiz' && S.q ? S.q.subs : (S.phase === 'rpick' && S.race ? Object.keys(S.race.slots) : []));
   $('#plist').innerHTML = `<div class="sub" style="margin-bottom:6px">참가자 ${S.players.length}명</div><div class="chips">` +
     S.players.map(p => {
       const crown = p.id === S.host ? '👑 ' : '';
@@ -1134,7 +1535,7 @@ function tallyHtml(){
 }
 
 /* ----- 로비(게임 선택) / 게임 설정 ----- */
-const GTITLE = { rps:'✌️ 가위바위보', ladder:'🪜 사다리타기', speed:'⏱️ 5초 만들기', quiz:'❓ 퀴즈풀기', vote:'🗳️ 익명투표함' };
+const GTITLE = { rps:'✌️ 가위바위보', ladder:'🪜 사다리타기', speed:'⏱️ 5초 만들기', quiz:'❓ 퀴즈풀기', vote:'🗳️ 익명투표함', race:'🏎️ 자동차 레이스' };
 function lobbyHtml(){
   const online = S.players.filter(p => p.on).length;
   if(!isHost) return `<h2>방장이 게임을 고르는 중…</h2><p class="sub" style="margin:0">잠시만 기다려 주세요. 접속 ${online}명</p>${tallyHtml()}`;
@@ -1143,7 +1544,7 @@ function lobbyHtml(){
   const gb = (g, label, cls) => `<button class="btn pri gbtn ${cls||''}" type="button" data-go="${g}"><span class="gi">${GTITLE[g].split(' ')[0]}</span>${label}</button>`;
   return `${ruleBlock(np)}
     <h2 style="margin-top:16px">게임 선택</h2>
-    <div class="games4">${gb('rps', '가위바위보')}${gb('ladder', '사다리타기')}${gb('speed', '5초 만들기<br>(5초에 가깝게)')}${gb('quiz', '퀴즈풀기')}${gb('vote', '익명투표함', 'gwide')}</div>
+    <div class="games4">${gb('rps', '가위바위보')}${gb('ladder', '사다리타기')}${gb('speed', '5초 만들기<br>(5초에 가깝게)')}${gb('quiz', '퀴즈풀기')}${gb('vote', '익명투표함', 'gwide')}${gb('race', '자동차 레이스', 'gwide')}</div>
     ${solo?'<div class="sub center" style="margin-top:10px">🤖 혼자라서 <b>연습 모드</b> — 연습봇과 함께 해봐요 · 방 코드 <b>'+esc(room)+'</b></div>':'<div class="sub center" style="margin-top:10px">방 코드 <b>'+esc(room)+'</b></div>'}
     <button class="btn sm" type="button" data-a="close" style="margin-top:10px">방 닫기</button>${tallyHtml()}`;
 }
@@ -1161,6 +1562,7 @@ function setupHtml(g, online){
     ladder: '번호(이름 위치)를 정하면 사다리가 공개되고 한 명씩 내려가요.',
     speed: `${SP_LEAD}초 준비 후 스톱워치가 시작돼요. ${SP_SHOW}초 뒤 숫자가 사라지면 마음속으로 세다가 ${SP_TARGET}초라고 느껴질 때 "멈춰!"를 누르세요. ${SP_TARGET}초에 가장 가까운 순서대로 당첨돼요. (예: 4.48초보다 5.02초가 더 가까워요)`,
     quiz: `문제를 내면 ${PICK_SECS}초 안에 답이 빨리 낸 순서대로 쌓여요. 정답자를 고르면 빠른 순서대로 당첨돼요.`,
+    race: `각자 자동차를 고르고 ${PICK_SECS}초 뒤 레이스가 시작돼요. 사람이 많을수록 상위권 위주로 카메라가 따라가요. 결승선 통과 순서가 순위이고, 순위는 꼴찌부터 빠르게 발표해요. 꼴찌 쪽 당첨 인원(기본: 참여 인원의 절반)만큼이 당첨이에요. (레이스 길이: 15명 이하 20초 · 20명 이상 45초)`,
     vote: '누가 투표했는지는 모두에게 보이지만, 무엇을 골랐는지는 알 수 없어요. 개표 전에는 방장도 득표 수를 볼 수 없어요.'
   };
   let extra = '';
@@ -1185,7 +1587,7 @@ function setupHtml(g, online){
   }
   return `<div class="row" style="justify-content:space-between;flex-wrap:nowrap"><h2 style="margin:0">${GTITLE[g]}</h2><button class="btn sm" type="button" data-a="back">← 게임 선택</button></div>
     <div class="sub" style="margin:6px 0 0">${DESC[g]}</div>${extra}
-    <button class="btn pri full" type="button" data-a="${g}" style="margin-top:16px;padding:16px;font-size:17px" ${ok?'':'disabled'}>${g==='quiz'?'퀴즈 시작':g==='vote'?'투표 시작':GTITLE[g].split(' ').slice(1).join(' ')+' 시작'}</button>
+    <button class="btn pri full" type="button" data-a="${g}" style="margin-top:16px;padding:16px;font-size:17px" ${ok?'':'disabled'}>${g==='quiz'?'퀴즈 시작':g==='vote'?'투표 시작':g==='race'?'레이스 시작':GTITLE[g].split(' ').slice(1).join(' ')+' 시작'}</button>
 `;
 }
 
@@ -1397,6 +1799,12 @@ function resultHtml(){
       (R.rank.length ? R.rank.map((r, i) => { const d = r.ms - SP_TARGET * 1000; return `<div class="rrow ${R.winners.includes(r.id)?'w':''}"><b>${i+1}</b><span>${esc(nm(r.id))}${R.winners.includes(r.id)?' <span class="badge">당첨</span>':''}</span><span>${fmtSec(r.ms)} (${d >= 0 ? '+' : '-'}${(Math.abs(d) / 1000).toFixed(2)})</span></div>`; }).join('') : '<div class="sub">기록 없음</div>');
     if(R.miss.length) h += `<div class="sub" style="margin-top:4px">😴 못 눌렀어요: ${R.miss.map(id => esc(nm(id))).join(', ')}</div>`;
   }
+  if(R.game === 'race' && R.rank){
+    h += `<div class="sub" style="margin-top:12px">최종 순위</div><div class="vlist">` + R.rank.map((r, i) => {
+      const win = R.winners.includes(r.id);
+      return `<div class="vrow ${win?'w':''} ${r.id===myId?'me':''}"><b>${i+1}</b><i class="sw" style="background:${CARS[r.c][1]}"></i><span class="cn">${CARS[r.c][0]}</span>${win?'<span class="badge">당첨</span>':''}<span class="on">${esc(nm(r.id))}</span></div>`;
+    }).join('') + '</div>';
+  }
   if(R.game === 'quiz'){
     h += `<div class="sub" style="margin-top:12px">문제: ${esc(R.q)}</div>` +
       (R.answers.length ? R.answers.map((a, i) => `<div class="arow ${a.ok?'ok':''}"><b>${i+1}</b><span class="who">${esc(nm(a.id))}${R.winners.includes(a.id)?'<span class="badge">당첨</span>':''}</span><span class="atx">${esc(a.text)}</span><span>${a.ok?'✓':''}</span></div>`).join('') : '<div class="sub">제출된 답변이 없어요</div>');
@@ -1436,7 +1844,7 @@ function startCount(){
 /* ---- 남은 시간 / 스피드 카운트다운 표시 ---- */
 setInterval(() => {
   if(!S) return;
-  if(S.phase === 'rps' || S.phase === 'lpick' || (S.phase === 'quiz' && S.q && !S.q.closed) || (S.phase === 'vote' && S.vote && S.vote.mode === 'time' && !S.vote.closing)){
+  if(S.phase === 'rps' || S.phase === 'lpick' || S.phase === 'rpick' || (S.phase === 'quiz' && S.q && !S.q.closed) || (S.phase === 'vote' && S.vote && S.vote.mode === 'time' && !S.vote.closing)){
     const el = $('#tm'); if(!el) return;
     const left = Math.max(0, S.secs - Math.floor((Date.now() - rkStart) / 1000));
     if(el.textContent !== String(left)){
@@ -1445,6 +1853,19 @@ setInterval(() => {
       if(left === 0 && S.phase === 'quiz' && !isHost && S.qids && S.qids.includes(myId) && !qSent && !S.q.subs.includes(myId)){
         const inp = $('#qAns'); if(inp && inp.value.trim()) submitAnswer();
       }
+    }
+  }else if(S.phase === 'rrev' && S.race){
+    const n = revCount();
+    if(n !== revSeen){
+      const first = revSeen < 0;
+      revSeen = n;
+      if(n > 0){
+        const r = S.race.N - n + 1, win = r > S.race.N - S.race.k;
+        if(r <= 3) { tone(300 + (4 - r) * 150, .35, 'triangle', .22); vib(r === 1 ? [120,60,120] : 60); }
+        else if(win) tone(260, .12, 'square', .09); else tone(520 + (n % 6) * 40, .08, 'triangle', .1);
+      }
+      render();
+      const e = $('#rv-last'); if(e && e.scrollIntoView) e.scrollIntoView({ block:'center', behavior: first ? 'auto' : 'smooth' });
     }
   }else if(S.phase === 'speed'){
     const st = spState();
@@ -1612,6 +2033,7 @@ $('#stage').addEventListener('click', e => {
   beep(440, .05);
   if(b.dataset.p != null){ const c = +b.dataset.p; if(act({t:'pick', c})) myPick = c; render(); return; }
   if(b.dataset.c != null){ act({t:'col', c: +b.dataset.c}); return; }
+  if(b.dataset.car != null){ act({t:'car', c: +b.dataset.car}); return; }
   if(b.dataset.mark != null){ qMark[b.dataset.mark] = !qMark[b.dataset.mark]; render(); return; }
   if(b.dataset.go != null){ setupGame = b.dataset.go; render(); return; }
   if(b.dataset.vo != null){ myVote = +b.dataset.vo; render(); return; }
@@ -1630,6 +2052,8 @@ $('#stage').addEventListener('click', e => {
     case 'quiz': startQuiz(); break;
     case 'speed': startSpeed(); break;
     case 'vote': startVote(); break;
+    case 'race': startRace(); break;
+    case 'raceGo': raceRun(); break;
     case 'vsub': submitVote(); break;
     case 'vclose': closeVote(); break;
     case 'ladderGo': ladderRun(); break;
